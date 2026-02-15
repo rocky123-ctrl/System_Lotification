@@ -1,0 +1,152 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block extrahead %}{{ block.super }}
+<script type="text/javascript" src="{% url 'admin:jsi18n' %}"></script>
+{{ form.media }}
+{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" type="text/css" href="{% static "admin/css/forms.css" %}">
+<style>
+    .export-form {
+        max-width: 600px;
+        margin: 20px auto;
+        padding: 20px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .form-row {
+        margin-bottom: 15px;
+    }
+    .form-row label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .form-row select,
+    .form-row input[type="checkbox"] {
+        margin-top: 5px;
+    }
+    .help-text {
+        color: #666;
+        font-size: 0.9em;
+        margin-top: 3px;
+    }
+    .submit-row {
+        margin-top: 20px;
+        padding-top: 15px;
+        border-top: 1px solid #eee;
+    }
+    .submit-row input {
+        background: #28a745;
+        color: white;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .submit-row input:hover {
+        background: #218838;
+    }
+    .info-box {
+        margin-top: 20px;
+        padding: 15px;
+        background: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 4px;
+    }
+    .info-box h4 {
+        margin-top: 0;
+        color: #0066cc;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+    &rsaquo; <a href="{% url 'admin:lotes_lote_changelist' %}">Lotes</a>
+    &rsaquo; Exportar Lotes
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <div class="export-form">
+        <h1>📤 Exportar Lotes a Excel</h1>
+        
+        <form method="post">
+            {% csrf_token %}
+            
+            <div class="form-row">
+                <label for="{{ form.formato.id_for_label }}">{{ form.formato.label }}</label>
+                {{ form.formato }}
+                {% if form.formato.help_text %}
+                    <div class="help-text">{{ form.formato.help_text }}</div>
+                {% endif %}
+                {% if form.formato.errors %}
+                    <div class="errors">{{ form.formato.errors }}</div>
+                {% endif %}
+            </div>
+            
+            <div class="form-row">
+                <label for="{{ form.incluir_inactivos.id_for_label }}">
+                    {{ form.incluir_inactivos }}
+                    {{ form.incluir_inactivos.label }}
+                </label>
+                {% if form.incluir_inactivos.help_text %}
+                    <div class="help-text">{{ form.incluir_inactivos.help_text }}</div>
+                {% endif %}
+            </div>
+            
+            <div class="form-row">
+                <label for="{{ form.solo_disponibles.id_for_label }}">
+                    {{ form.solo_disponibles }}
+                    {{ form.solo_disponibles.label }}
+                </label>
+                {% if form.solo_disponibles.help_text %}
+                    <div class="help-text">{{ form.solo_disponibles.help_text }}</div>
+                {% endif %}
+            </div>
+            
+            <div class="submit-row">
+                <input type="submit" value="📤 Exportar Lotes" />
+            </div>
+        </form>
+        
+        <div class="info-box">
+            <h4>📋 Información de Exportación</h4>
+            <p><strong>Columnas incluidas:</strong></p>
+            <ul>
+                <li><strong>manzana:</strong> Nombre de la manzana</li>
+                <li><strong>numero_lote:</strong> Número del lote</li>
+                <li><strong>metros_cuadrados:</strong> Área del lote en m²</li>
+                <li><strong>valor_total:</strong> Valor total en quetzales</li>
+                <li><strong>enganche:</strong> Monto del enganche</li>
+                <li><strong>costo_instalacion:</strong> Costo de instalación</li>
+                <li><strong>plazo_meses:</strong> Plazo de financiamiento</li>
+                <li><strong>cuota_mensual:</strong> Cuota mensual</li>
+                <li><strong>estado:</strong> Estado actual del lote</li>
+                <li><strong>activo:</strong> Si el lote está activo</li>
+                <li><strong>fecha_creacion:</strong> Fecha de creación</li>
+                <li><strong>fecha_actualizacion:</strong> Última actualización</li>
+            </ul>
+            
+            <p><strong>Filtros disponibles:</strong></p>
+            <ul>
+                <li><strong>Incluir inactivos:</strong> Si está marcado, incluirá lotes inactivos</li>
+                <li><strong>Solo disponibles:</strong> Si está marcado, solo exportará lotes con estado "disponible"</li>
+            </ul>
+            
+            <p><strong>Formatos soportados:</strong></p>
+            <ul>
+                <li><strong>Excel (.xlsx):</strong> Formato recomendado, mantiene todos los tipos de datos</li>
+                <li><strong>CSV (.csv):</strong> Formato simple, compatible con cualquier editor de texto</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
