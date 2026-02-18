@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\JGALINDO\Documents\DJANGO_REST\system_lotificacion\env
+set VIRTUAL_ENV=C:\GITHUB\system_lotification-main\system_lotification-main\env
 
 if not defined PROMPT set PROMPT=$P$G
 

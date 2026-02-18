@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'lotes',
     'configuracion',
     'financiamiento',
+    'planos',
 ]
 
 MIDDLEWARE = [
@@ -78,11 +79,17 @@ WSGI_APPLICATION = 'system_lotificacion.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'system_lotificacion',
-        'USER': 'postgres',
-        'PASSWORD': 'postgres',  # Cambia esto por tu contraseña de PostgreSQL
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'NAME': os.environ.get('DB_NAME', 'system_lotificacion'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'postgres'),  # Cambia esto por tu contraseña de PostgreSQL
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
+        'OPTIONS': {
+            'connect_timeout': 10,
+            'options': '-c timezone=UTC',
+        },
+        'CONN_MAX_AGE': 600,  # Mantener conexiones abiertas por 10 minutos
+        'ATOMIC_REQUESTS': False,
     }
 }
 
@@ -273,7 +280,7 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
 # Security settings for development
 SECURE_BROWSER_XSS_FILTER = False
 SECURE_CONTENT_TYPE_NOSNIFF = False
-X_FRAME_OPTIONS = 'DENY'
+X_FRAME_OPTIONS = 'SAMEORIGIN'  # Permite mostrar contenido en iframes del mismo origen
 
 # Django Admin customization
 ADMIN_SITE_HEADER = "Sistema de Lotificación - Administración"
