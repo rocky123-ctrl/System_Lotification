@@ -55,7 +55,7 @@ class ImportarLotesForm(forms.Form):
             # Verificar columnas requeridas
             columnas_requeridas = [
                 'manzana', 'numero_lote', 'metros_cuadrados', 
-                'valor_total', 'enganche', 'plazo_meses', 'cuota_mensual'
+                'valor_total'
             ]
             
             columnas_faltantes = [col for col in columnas_requeridas if col not in df.columns]
@@ -119,9 +119,6 @@ class ImportarLotesForm(forms.Form):
                         'numero_lote': numero_lote,
                         'metros_cuadrados': Decimal(str(row['metros_cuadrados'])),
                         'valor_total': Decimal(str(row['valor_total'])),
-                        'enganche': Decimal(str(row['enganche'])),
-                        'plazo_meses': int(row['plazo_meses']),
-                        'cuota_mensual': Decimal(str(row['cuota_mensual'])),
                         'estado': 'disponible',
                         'activo': True
                     }
@@ -132,7 +129,7 @@ class ImportarLotesForm(forms.Form):
                     
                     if 'estado' in row and pd.notna(row['estado']):
                         estado = str(row['estado']).strip().lower()
-                        if estado in ['disponible', 'reservado', 'vendido', 'en_proceso', 'cancelado']:
+                        if estado in ['disponible', 'reservado', 'pagado', 'comercial_y_bodega', 'financiado', 'pagado_y_escriturado']:
                             datos_lote['estado'] = estado
                     
                     # Crear o actualizar lote

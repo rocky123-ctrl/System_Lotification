@@ -4,45 +4,51 @@ from django.urls import path
 from django.contrib import messages
 from django.http import HttpResponse
 from django.utils import timezone
-from .models import Manzana, Lote, HistorialLote
+from .models import Lotificacion, Manzana, Lote, HistorialLote
 from .forms import ImportarLotesForm, ExportarLotesForm
 import pandas as pd
 from io import BytesIO
 
 
+@admin.register(Lotificacion)
+class LotificacionAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'ubicacion', 'activo', 'fecha_creacion')
+    list_filter = ('activo', 'fecha_creacion')
+    search_fields = ('nombre', 'descripcion', 'ubicacion')
+    ordering = ('nombre',)
+    list_editable = ('activo',)
+
+
 @admin.register(Manzana)
 class ManzanaAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'descripcion', 'activo', 'fecha_creacion')
-    list_filter = ('activo', 'fecha_creacion')
-    search_fields = ('nombre', 'descripcion')
-    ordering = ('nombre',)
+    list_display = ('nombre', 'lotificacion', 'descripcion', 'activo', 'fecha_creacion')
+    list_filter = ('lotificacion', 'activo', 'fecha_creacion')
+    search_fields = ('nombre', 'descripcion', 'lotificacion__nombre')
+    ordering = ('lotificacion', 'nombre',)
     list_editable = ('activo',)
 
 
 @admin.register(Lote)
 class LoteAdmin(admin.ModelAdmin):
     list_display = (
-        'numero_lote', 'manzana', 'metros_cuadrados', 'valor_total', 
-        'enganche', 'estado', 'activo', 'fecha_creacion'
+        'identificador', 'numero_lote', 'manzana', 'metros_cuadrados', 'valor_total', 
+        'estado', 'version', 'actualizado_por', 'activo', 'fecha_creacion'
     )
-    list_filter = ('manzana', 'estado', 'activo', 'fecha_creacion')
-    search_fields = ('numero_lote', 'manzana__nombre')
-    ordering = ('manzana', 'numero_lote')
+    list_filter = ('manzana__lotificacion', 'manzana', 'estado', 'activo', 'fecha_creacion', 'actualizado_por')
+    search_fields = ('identificador', 'numero_lote', 'manzana__nombre', 'manzana__lotificacion__nombre')
+    ordering = ('manzana__lotificacion', 'manzana', 'numero_lote')
     list_editable = ('estado', 'activo')
-    readonly_fields = ('saldo_financiar', 'fecha_creacion', 'fecha_actualizacion')
+    readonly_fields = ('saldo_financiar', 'version', 'fecha_creacion', 'fecha_actualizacion')
     
     fieldsets = (
         ('Información Básica', {
-            'fields': ('manzana', 'numero_lote', 'metros_cuadrados', 'estado')
+            'fields': ('manzana', 'numero_lote', 'identificador', 'metros_cuadrados', 'estado')
         }),
         ('Información Financiera', {
-            'fields': ('valor_total', 'enganche', 'costo_instalacion', 'saldo_financiar')
+            'fields': ('valor_total', 'costo_instalacion', 'saldo_financiar')
         }),
-        ('Financiamiento', {
-            'fields': ('plazo_meses', 'cuota_mensual')
-        }),
-        ('Control', {
-            'fields': ('activo', 'fecha_creacion', 'fecha_actualizacion')
+        ('Control y Auditoría', {
+            'fields': ('version', 'actualizado_por', 'activo', 'fecha_creacion', 'fecha_actualizacion')
         }),
     )
     
@@ -104,15 +110,15 @@ class LoteAdmin(admin.ModelAdmin):
         datos_exportacion = []
         for lote in queryset:
             datos_exportacion.append({
+                'lotificacion': lote.manzana.lotificacion.nombre,
                 'manzana': lote.manzana.nombre,
+                'identificador': lote.identificador,
                 'numero_lote': lote.numero_lote,
                 'metros_cuadrados': float(lote.metros_cuadrados),
                 'valor_total': float(lote.valor_total),
-                'enganche': float(lote.enganche),
                 'costo_instalacion': float(lote.costo_instalacion),
-                'plazo_meses': lote.plazo_meses,
-                'cuota_mensual': float(lote.cuota_mensual),
                 'estado': lote.estado,
+                'version': lote.version,
                 'activo': lote.activo,
                 'fecha_creacion': lote.fecha_creacion.strftime('%Y-%m-%d %H:%M:%S'),
                 'fecha_actualizacion': lote.fecha_actualizacion.strftime('%Y-%m-%d %H:%M:%S'),

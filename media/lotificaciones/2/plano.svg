@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     version="1.1"
+     width="595"
+     height="842"
+     viewBox="0 0 595 842">
+
+<style>
+  g[inkscape\:label="LOTES"] path {
+    cursor: pointer;
+    pointer-events: all;
+    transition: 0.2s ease;
+  }
+
+  g[inkscape\:label="LOTES"] path:hover {
+    fill: rgba(0, 123, 255, 0.2);
+  }
+</style>
+
+<defs>
+<clipPath id="clip_1">
+<path transform="matrix(.12,0,0,-.12,14,794)" d="M273 0H3929V2164H273V0"/>
+</clipPath>
+<clipPath id="clip_2">
+<path transform="matrix(.12,0,0,-.12,14,794)" d="M273 0H3929V2164H273V0"/>
+</clipPath>
+<clipPath id="clip_3">
+<path transform="matrix(.12,0,0,-.12,14,794)" d="M273 0H3929V2164H273V0"/>
+</clipPath>
+</defs>
+
+<g clip-path="url(#clip_1)">
+  <g inkscape:groupmode="layer" inkscape:label="LOTES">
+
+    <path id="A-01"
+      transform="matrix(.12,0,0,-.12,14,794)"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="transparent"
+      stroke="#000000"
+      d="M1262 1109H1498L1497 1587H1261L1262 1109"/>
+
+    <path id="A-02"
+      transform="matrix(.12,0,0,-.12,14,794)"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="transparent"
+      stroke="#000000"
+      d="M1525 1119H1761L1757 1573H1521L1525 1119"/>
+
+    <path id="A-03"
+      transform="matrix(.12,0,0,-.12,14,794)"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="transparent"
+      stroke="#000000"
+      d="M1789 1123H2026V1568H1790L1789 1123"/>
+
+    <path id="A-04"
+      transform="matrix(.12,0,0,-.12,14,794)"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="transparent"
+      stroke="#000000"
+      d="M2050 1125H2286L2289 1569H2052L2050 1125"/>
+
+  </g>
+
+  <g inkscape:groupmode="layer" inkscape:label="CALLES">
+    <path transform="matrix(.12,0,0,-.12,14,794)"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="none"
+      stroke="#000000"
+      d="M1254 860H2435V1096H1254V860"/>
+  </g>
+
+  <g inkscape:groupmode="layer" inkscape:label="MANZANA">
+    <path transform="matrix(.12,0,0,-.12,14,794)"
+      stroke-width="6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      fill="none"
+      stroke="#000000"
+      d="M1250 1098H2431V1599H1250V1098"/>
+  </g>
+</g>
+
+<g clip-path="url(#clip_2)">
+  <g inkscape:groupmode="layer" inkscape:label="TEXTO_LOTES">
+    <text xml:space="preserve"
+      transform="matrix(.12 0 -0 .12 14 794)"
+      font-size="82.466"
+      font-family="Arial">
+      <tspan y="-1324" x="1297 1352.0049 1379.4661 1425.3171">A-01</tspan>
+    </text>
+  </g>
+</g>
+
+<g clip-path="url(#clip_3)">
+  <text xml:space="preserve"
+    transform="matrix(.12 0 -0 .12 14 794)"
+    font-size="82.466"
+    font-family="Arial">
+    <tspan y="-1326" x="1557 1612.0049 1639.4661 1685.3171">A-02</tspan>
+  </text>
+
+  <text xml:space="preserve"
+    transform="matrix(.12 0 -0 .12 14 794)"
+    font-size="82.466"
+    font-family="Arial">
+    <tspan y="-1324" x="1824 1879.0049 1906.4661 1952.3171">A-03</tspan>
+  </text>
+
+  <text xml:space="preserve"
+    transform="matrix(.12 0 -0 .12 14 794)"
+    font-size="82.466"
+    font-family="Arial">
+    <tspan y="-1324" x="2085 2140.005 2167.466 2213.3172">A-04</tspan>
+  </text>
+</g>
+
+</svg>

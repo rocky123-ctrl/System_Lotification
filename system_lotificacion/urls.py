@@ -29,7 +29,6 @@ urlpatterns = [
     path('api/lotes/', include('lotes.urls')),
     path('api/configuracion/', include('configuracion.urls')),
     path('api/financiamiento/', include('financiamiento.urls')),
-    path('api/planos/', include('planos.urls')),
 ]
 
 # Servir archivos estáticos y media en desarrollo

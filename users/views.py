@@ -21,6 +21,14 @@ class UserListView(generics.ListAPIView):
     def get_queryset(self):
         queryset = User.objects.filter(is_active=True)
         
+        # Filtrar por rol (ej: role=Vendedor para listar solo vendedores)
+        role = self.request.query_params.get('role', None)
+        if role:
+            queryset = queryset.filter(
+                user_roles__role__name__iexact=role.strip(),
+                user_roles__is_active=True
+            ).distinct()
+        
         # Filtros
         search = self.request.query_params.get('search', None)
         is_online = self.request.query_params.get('is_online', None)
@@ -39,7 +47,7 @@ class UserListView(generics.ListAPIView):
             elif is_online.lower() == 'false':
                 queryset = queryset.exclude(sessions__is_active=True)
         
-        return queryset.order_by('-date_joined')
+        return queryset.select_related('profile').order_by('-date_joined')
 
 
 class UserDetailView(generics.RetrieveAPIView):

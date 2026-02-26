@@ -85,13 +85,13 @@ class ConfiguracionGeneralViewSet(viewsets.ModelViewSet):
         lotes = Lote.objects.filter(activo=True)
         total_lotes_reales = lotes.count()
         
-        # Contar por estado
+        # Contar por estado (nuevos: disponible, reservado, pagado, comercial_y_bodega, financiado, pagado_y_escriturado)
         lotes_disponibles = lotes.filter(estado='disponible').count()
         lotes_reservados = lotes.filter(estado='reservado').count()
-        lotes_en_proceso = lotes.filter(estado='en_proceso').count()
+        lotes_en_proceso = lotes.filter(estado='comercial_y_bodega').count()
         lotes_financiados = lotes.filter(estado='financiado').count()
-        lotes_vendidos = lotes.filter(estado='vendido').count()
-        lotes_cancelados = lotes.filter(estado='cancelado').count()
+        lotes_vendidos = lotes.filter(estado__in=['pagado', 'pagado_y_escriturado']).count()
+        lotes_cancelados = 0  # ya no se usa estado cancelado
         
         # Calcular valores totales
         valor_total_inventario = lotes.filter(estado='disponible').aggregate(
@@ -102,7 +102,7 @@ class ConfiguracionGeneralViewSet(viewsets.ModelViewSet):
             total=Sum('valor_total')
         )['total'] or Decimal('0.00')
         
-        valor_total_en_proceso = lotes.filter(estado='en_proceso').aggregate(
+        valor_total_en_proceso = lotes.filter(estado='comercial_y_bodega').aggregate(
             total=Sum('valor_total')
         )['total'] or Decimal('0.00')
         
@@ -110,7 +110,7 @@ class ConfiguracionGeneralViewSet(viewsets.ModelViewSet):
             total=Sum('valor_total')
         )['total'] or Decimal('0.00')
         
-        valor_total_vendido = lotes.filter(estado='vendido').aggregate(
+        valor_total_vendido = lotes.filter(estado__in=['pagado', 'pagado_y_escriturado']).aggregate(
             total=Sum('valor_total')
         )['total'] or Decimal('0.00')
         

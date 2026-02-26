@@ -5,6 +5,7 @@ from . import views
 app_name = 'lotes'
 
 router = DefaultRouter()
+router.register(r'lotificaciones', views.LotificacionViewSet)
 router.register(r'manzanas', views.ManzanaViewSet)
 router.register(r'lotes', views.LoteViewSet)
 router.register(r'historial', views.HistorialLoteViewSet)

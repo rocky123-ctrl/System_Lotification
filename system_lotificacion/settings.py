@@ -64,7 +64,6 @@ INSTALLED_APPS = [
     "lotes",
     "configuracion",
     "financiamiento",
-    "planos",
 ]
 
 MIDDLEWARE = [

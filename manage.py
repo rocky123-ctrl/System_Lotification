@@ -11,7 +11,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'system_lotificacion.settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'system_lotificacion.settings_dev_simple')
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
