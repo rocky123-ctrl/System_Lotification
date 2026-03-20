@@ -26,9 +26,11 @@ urlpatterns = [
     path('api/auth/', include('authentication.urls')),
     path('api/permissions/', include('permissions.urls')),
     path('api/users/', include('users.urls')),
+    path('api/clientes/', include('clientes.urls')),
     path('api/lotes/', include('lotes.urls')),
     path('api/configuracion/', include('configuracion.urls')),
     path('api/financiamiento/', include('financiamiento.urls')),
+    path('api/empleados/', include('empleados.urls')),
 ]
 
 # Servir archivos estáticos y media en desarrollo

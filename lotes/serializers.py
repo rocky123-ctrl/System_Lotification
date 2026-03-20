@@ -138,16 +138,18 @@ class LoteCreateSerializer(serializers.ModelSerializer):
 
 
 class LoteUpdateSerializer(serializers.ModelSerializer):
-    """Serializer para actualizar lotes con control de concurrencia"""
+    """Serializer para actualizar lotes con control de concurrencia. Permite editar también manzana y numero_lote (no identificador)."""
     version = serializers.IntegerField(required=True)
-    
+    manzana = serializers.PrimaryKeyRelatedField(queryset=Manzana.objects.all(), required=False)
+    numero_lote = serializers.CharField(max_length=10, required=False)
+
     class Meta:
         model = Lote
         fields = [
-            'metros_cuadrados', 'valor_total', 'costo_instalacion', 
+            'manzana', 'numero_lote', 'metros_cuadrados', 'valor_total', 'costo_instalacion',
             'estado', 'activo', 'version'
         ]
-    
+
     def validate(self, attrs):
         instance = self.instance
         if instance:
@@ -155,6 +157,12 @@ class LoteUpdateSerializer(serializers.ModelSerializer):
             if version_enviada != instance.version:
                 raise serializers.ValidationError({
                     'version': 'El lote ha sido modificado por otro usuario. Por favor, recarga los datos.'
+                })
+            # Si se cambia manzana, debe ser de la misma lotificación que la actual
+            manzana = attrs.get('manzana') or instance.manzana
+            if manzana and instance.manzana_id and manzana.lotificacion_id != instance.manzana.lotificacion_id:
+                raise serializers.ValidationError({
+                    'manzana': 'La manzana debe pertenecer a la misma lotificación del lote.'
                 })
         valor_total = attrs.get('valor_total', instance.valor_total if instance else None)
         costo_instalacion = attrs.get('costo_instalacion', instance.costo_instalacion if instance else None)

@@ -247,25 +247,13 @@ class Lote(models.Model):
         return f"{self.metros_cuadrados} m²"
 
     def save(self, *args, **kwargs):
-        """Sobrescribir save para validaciones adicionales y auditoría"""
-        # Generar identificador automáticamente si no existe
-        if not self.identificador and self.manzana_id and self.numero_lote:
-            try:
-                # Obtener nombre de manzana si no está cargado
-                if hasattr(self, 'manzana') and self.manzana:
-                    nombre_manzana = self.manzana.nombre
-                else:
-                    # Cargar manzana desde BD si no está disponible
-                    manzana = Manzana.objects.get(pk=self.manzana_id)
-                    nombre_manzana = manzana.nombre
-                
-                # Formato: MZ{nombre_manzana}-L{numero_lote}
-                # Ejemplo: MZ03-L07
-                self.identificador = f"MZ{nombre_manzana}-L{self.numero_lote}"
-            except Exception:
-                # Si falla, dejar que se genere después o usar un identificador temporal
-                pass
-        
+        """Sobrescribir save para validaciones adicionales y auditoría.
+
+        No se auto-genera identificador aquí: los lotes creados manualmente (sin plano)
+        deben mantener identificador=NULL para poder aparecer en "lotes sin identificar"
+        y luego relacionarse con un path del SVG. El identificador se asigna al
+        registrar desde el plano (registrar_lote) o al relacionar un lote existente.
+        """
         # Obtener usuario del contexto si está disponible
         user = kwargs.pop('user', None)
         if user:

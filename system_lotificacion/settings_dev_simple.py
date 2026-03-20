@@ -40,6 +40,8 @@ INSTALLED_APPS = [
     'lotes',
     'configuracion',
     'financiamiento',
+    'clientes',
+    'empleados',
 ]
 
 MIDDLEWARE = [

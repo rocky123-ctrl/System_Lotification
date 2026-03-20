@@ -144,6 +144,29 @@ class LotificacionViewSet(viewsets.ModelViewSet):
         serializer = LotePlanoListSerializer(lotes, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], url_path='lotes-sin-identificador')
+    def lotes_sin_identificador(self, request, pk=None):
+        """
+        Listar lotes de una lotificación que aún no están relacionados a un lote del plano SVG.
+
+        Definición de "no relacionados":
+        - Lotes activos cuya manzana pertenece a la lotificación, y
+        - Campo identificador es NULL.
+
+        GET /api/lotes/lotificaciones/{id}/lotes-sin-identificador/
+        """
+        lotes = (
+            Lote.objects.filter(
+                manzana__lotificacion_id=pk,
+                activo=True,
+                identificador__isnull=True,
+            )
+            .select_related('manzana', 'manzana__lotificacion')
+            .order_by('manzana__nombre', 'numero_lote')
+        )
+        serializer = LoteListSerializer(lotes, many=True)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['get'], url_path=r'lotes/(?P<identificador>[^/.]+)')
     def lote_por_identificador(self, request, pk=None, identificador=None):
         """
@@ -158,10 +181,9 @@ class LotificacionViewSet(viewsets.ModelViewSet):
             activo=True
         ).select_related('manzana', 'manzana__lotificacion', 'actualizado_por').first()
         if not lote:
-            return Response(
-                {'error': f'No se encontró un lote con identificador "{identificador}" en esta lotificación.'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            # 200 + null para que en el inspector no aparezca como error 404
+            # (el lote en el plano existe pero aún no tiene datos en BD)
+            return Response(None, status=status.HTTP_200_OK)
         serializer = LoteSerializer(lote)
         return Response(serializer.data)
 
@@ -263,6 +285,163 @@ class LotificacionViewSet(viewsets.ModelViewSet):
                 Lote.objects.filter(pk=lote.pk).update(actualizado_por=request.user)
                 lote.refresh_from_db()
         return Response(LoteSerializer(lote).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='relacionar-lote')
+    def relacionar_lote_existente(self, request, pk=None):
+        """
+        Relacionar un lote ya creado (sin identificador) con un lote del plano SVG.
+
+        POST /api/lotes/lotificaciones/{id}/relacionar-lote/
+
+        Body JSON:
+        {
+            "lote_id": 123,
+            "identificador": "MZ03-L07"
+        }
+
+        - Valida que el lote pertenezca a la lotificación.
+        - Valida que el identificador tenga formato correcto.
+        - Actualiza manzana, número de lote e identificador del lote existente.
+        """
+        lotificacion = self.get_object()
+        lote_id = request.data.get('lote_id')
+        identificador = (request.data.get('identificador') or '').strip()
+
+        if not lote_id:
+            return Response(
+                {'error': 'El campo \"lote_id\" es obligatorio.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            lote_id = int(lote_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'El campo \"lote_id\" debe ser un entero válido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not identificador:
+            return Response(
+                {'error': 'El campo \"identificador\" es obligatorio.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Reutilizar la misma lógica de formato que en registrar_lote
+        match = re.match(r'^MZ(.+)-L(.+)$', identificador, re.IGNORECASE)
+        if match:
+            nombre_manzana = match.group(1).strip()
+            numero_lote = match.group(2).strip()
+        else:
+            match = re.match(r'^(.+)-(.+)$', identificador)
+            if not match:
+                return Response(
+                    {
+                        'error': 'Identificador no válido. Use el formato MZ{manzana}-L{número} (ej: MZ03-L07) '
+                                 'o {manzana}-{número} (ej: A-01).'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            nombre_manzana = match.group(1).strip()
+            numero_lote = match.group(2).strip()
+
+        if not nombre_manzana or not numero_lote:
+            return Response(
+                {'error': 'Identificador no válido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        manzana = Manzana.objects.filter(
+            lotificacion_id=lotificacion.id,
+            nombre=nombre_manzana,
+        ).first()
+
+        if not manzana:
+            return Response(
+                {'error': f'No existe la manzana \"{nombre_manzana}\" en esta lotificación.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            lote = (
+                Lote.objects.select_for_update()
+                .filter(pk=lote_id, manzana__lotificacion_id=lotificacion.id, activo=True)
+                .first()
+            )
+            if not lote:
+                return Response(
+                    {
+                        'error': 'No se encontró un lote activo con ese ID en esta lotificación.',
+                        'lote_id': lote_id,
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Solo permitir vincular si el lote tiene la misma manzana y número que el identificador del plano
+            if lote.manzana_id != manzana.pk or (lote.numero_lote or '').strip() != numero_lote:
+                return Response(
+                    {
+                        'error': (
+                            f'No se puede vincular: el lote del plano \"{identificador}\" corresponde a '
+                            f'manzana \"{nombre_manzana}\" y número \"{numero_lote}\". '
+                            'Solo puede vincular con un registro que tenga la misma manzana y el mismo número de lote.'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Verificar que no exista otro lote con el mismo identificador
+            if Lote.objects.exclude(pk=lote.pk).filter(identificador=identificador).exists():
+                return Response(
+                    {'error': f'Ya existe un lote con identificador \"{identificador}\".'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            lote.identificador = identificador
+            lote.save(user=request.user if hasattr(request, 'user') else None)
+
+        serializer = LoteSerializer(lote)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='desvincular-lote')
+    def desvincular_lote(self, request, pk=None):
+        """
+        Desvincular un lote del plano: quita su identificador para que vuelva a
+        estar disponible para relacionar con otro path del SVG.
+
+        POST /api/lotes/lotificaciones/{id}/desvincular-lote/
+        Body: { "lote_id": 123 }
+        """
+        lotificacion = self.get_object()
+        lote_id = request.data.get('lote_id')
+        if not lote_id:
+            return Response(
+                {'error': 'El campo "lote_id" es obligatorio.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            lote_id = int(lote_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'El campo "lote_id" debe ser un entero válido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        lote = Lote.objects.filter(
+            pk=lote_id,
+            manzana__lotificacion_id=lotificacion.id,
+            activo=True,
+        ).first()
+        if not lote:
+            return Response(
+                {'error': 'No se encontró un lote activo con ese ID en esta lotificación.', 'lote_id': lote_id},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        lote.identificador = None
+        lote.save()
+        if request.user and getattr(request.user, 'is_authenticated', True):
+            Lote.objects.filter(pk=lote.pk).update(actualizado_por=request.user)
+            lote.refresh_from_db()
+        return Response(LoteSerializer(lote).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='subir-plano-svg')
     def subir_plano_svg(self, request, pk=None):
@@ -480,8 +659,13 @@ class LoteViewSet(viewsets.ModelViewSet):
                     'version': 'El lote ha sido modificado por otro usuario. Por favor, recarga los datos.'
                 })
             
-            # Guardar el lote con usuario para auditoría
-            lote = serializer.save(user=self.request.user)
+            # Guardar cambios del serializer
+            lote = serializer.save()
+
+            # Actualizar usuario de auditoría
+            if hasattr(self.request, "user") and self.request.user and self.request.user.is_authenticated:
+                Lote.objects.filter(pk=lote.pk).update(actualizado_por=self.request.user)
+                lote.refresh_from_db()
             
             # Registrar cambio de estado si cambió
             if old_status != new_status:
@@ -496,8 +680,22 @@ class LoteViewSet(viewsets.ModelViewSet):
         return lote
     
     def perform_create(self, serializer):
-        """Crear lote con usuario para auditoría"""
-        serializer.save(user=self.request.user)
+        """Crear lote con usuario para auditoría.
+
+        Si el modelo Lote lanza un ValueError (por ejemplo, saldo a financiar <= 0),
+        lo convertimos en ValidationError para que el frontend reciba un 400
+        con un mensaje claro, en lugar de un 500.
+        """
+        try:
+            lote = serializer.save()
+        except ValueError as exc:
+            # Convertir errores de negocio del modelo en ValidationError de DRF
+            raise drf_serializers.ValidationError({'non_field_errors': [str(exc)]})
+
+        # Asignar usuario de auditoría (sin interferir con la creación)
+        if hasattr(self.request, "user") and self.request.user and self.request.user.is_authenticated:
+            Lote.objects.filter(pk=lote.pk).update(actualizado_por=self.request.user)
+            lote.refresh_from_db()
     
     @action(detail=False, methods=['get'], url_path='por-identificador/(?P<identificador>[^/.]+)')
     def por_identificador(self, request, identificador=None):
