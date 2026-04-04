@@ -9,6 +9,8 @@ class Cliente(models.Model):
 
     nombres = models.CharField(max_length=150)
     apellidos = models.CharField(max_length=150)
+    dpi = models.CharField(max_length=20, null=True, blank=True)
+    nit = models.CharField(max_length=20, null=True, blank=True)
     telefono = models.CharField(max_length=20, null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     direccion = models.TextField()

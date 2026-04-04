@@ -165,12 +165,22 @@ class Lote(models.Model):
     
     # Identificador único para SVG (ej: "MZ03-L07")
     identificador = models.CharField(
-        max_length=50, 
+        max_length=150, 
         unique=True,
         null=True,
         blank=True,
         verbose_name='Identificador SVG',
         help_text='Identificador único que coincide con el id del path en el SVG (ej: MZ03-L07)'
+    )
+    
+    # Override de SVG ID para vinculaciones manuales
+    plano_svg_id = models.CharField(
+        max_length=150,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='Plano SVG ID (Override)',
+        help_text='ID textual exacto del SVG para sobreescribir la vinculacion dinamica'
     )
     
     # Estado y control
@@ -205,7 +215,14 @@ class Lote(models.Model):
         ordering = ['manzana', 'numero_lote']
         indexes = [
             models.Index(fields=['identificador'], name='lotes_identificador_idx'),
+            models.Index(fields=['plano_svg_id'], name='lotes_plano_svg_id_idx'),
             models.Index(fields=['manzana', 'estado'], name='lotes_manzana_estado_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['manzana', 'plano_svg_id'],
+                name='unique_plano_svg_per_manzana'
+            )
         ]
 
     def __str__(self):

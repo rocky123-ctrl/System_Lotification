@@ -307,6 +307,12 @@ class LotificacionViewSet(viewsets.ModelViewSet):
         lote_id = request.data.get('lote_id')
         identificador = (request.data.get('identificador') or '').strip()
 
+        # Extraer [manzana]-[numero_lote] omitiendo la abreviatura de la lotificación
+        if '-' in identificador:
+            plano_svg_id_val = identificador.split('-', 1)[1]
+        else:
+            plano_svg_id_val = identificador
+
         if not lote_id:
             return Response(
                 {'error': 'El campo \"lote_id\" es obligatorio.'},
@@ -327,41 +333,6 @@ class LotificacionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Reutilizar la misma lógica de formato que en registrar_lote
-        match = re.match(r'^MZ(.+)-L(.+)$', identificador, re.IGNORECASE)
-        if match:
-            nombre_manzana = match.group(1).strip()
-            numero_lote = match.group(2).strip()
-        else:
-            match = re.match(r'^(.+)-(.+)$', identificador)
-            if not match:
-                return Response(
-                    {
-                        'error': 'Identificador no válido. Use el formato MZ{manzana}-L{número} (ej: MZ03-L07) '
-                                 'o {manzana}-{número} (ej: A-01).'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            nombre_manzana = match.group(1).strip()
-            numero_lote = match.group(2).strip()
-
-        if not nombre_manzana or not numero_lote:
-            return Response(
-                {'error': 'Identificador no válido.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        manzana = Manzana.objects.filter(
-            lotificacion_id=lotificacion.id,
-            nombre=nombre_manzana,
-        ).first()
-
-        if not manzana:
-            return Response(
-                {'error': f'No existe la manzana \"{nombre_manzana}\" en esta lotificación.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         with transaction.atomic():
             lote = (
                 Lote.objects.select_for_update()
@@ -377,27 +348,15 @@ class LotificacionViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            # Solo permitir vincular si el lote tiene la misma manzana y número que el identificador del plano
-            if lote.manzana_id != manzana.pk or (lote.numero_lote or '').strip() != numero_lote:
+            # Verificar que no exista otro lote con el mismo plano_svg_id en esta lotificación
+            if Lote.objects.exclude(pk=lote.pk).filter(plano_svg_id=plano_svg_id_val, manzana__lotificacion_id=lotificacion.id).exists():
                 return Response(
-                    {
-                        'error': (
-                            f'No se puede vincular: el lote del plano \"{identificador}\" corresponde a '
-                            f'manzana \"{nombre_manzana}\" y número \"{numero_lote}\". '
-                            'Solo puede vincular con un registro que tenga la misma manzana y el mismo número de lote.'
-                        )
-                    },
+                    {'error': f'Ya existe un lote vinculado al ID del plano SVG "{plano_svg_id_val}" en esta lotificación.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Verificar que no exista otro lote con el mismo identificador
-            if Lote.objects.exclude(pk=lote.pk).filter(identificador=identificador).exists():
-                return Response(
-                    {'error': f'Ya existe un lote con identificador \"{identificador}\".'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            lote.identificador = identificador
+            # Guardar el SVG ID extraido, preservar el 'identificador' original comercial sin tocarlo
+            lote.plano_svg_id = plano_svg_id_val
             lote.save(user=request.user if hasattr(request, 'user') else None)
 
         serializer = LoteSerializer(lote)
@@ -436,8 +395,8 @@ class LotificacionViewSet(viewsets.ModelViewSet):
                 {'error': 'No se encontró un lote activo con ese ID en esta lotificación.', 'lote_id': lote_id},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        lote.identificador = None
-        lote.save()
+        lote.plano_svg_id = None
+        lote.save(user=request.user if hasattr(request, 'user') else None)
         if request.user and getattr(request.user, 'is_authenticated', True):
             Lote.objects.filter(pk=lote.pk).update(actualizado_por=request.user)
             lote.refresh_from_db()

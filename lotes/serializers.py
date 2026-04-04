@@ -114,7 +114,7 @@ class LotePlanoListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lote
-        fields = ['id', 'identificador', 'estado', 'activo', 'manzana', 'manzana_nombre']
+        fields = ['id', 'identificador', 'plano_svg_id', 'estado', 'activo', 'manzana', 'manzana_nombre']
 
 
 class LoteCreateSerializer(serializers.ModelSerializer):
@@ -138,7 +138,7 @@ class LoteCreateSerializer(serializers.ModelSerializer):
 
 
 class LoteUpdateSerializer(serializers.ModelSerializer):
-    """Serializer para actualizar lotes con control de concurrencia. Permite editar también manzana y numero_lote (no identificador)."""
+    """Serializer para actualizar lotes con control de concurrencia. Permite editar también manzana, numero_lote, e identificador."""
     version = serializers.IntegerField(required=True)
     manzana = serializers.PrimaryKeyRelatedField(queryset=Manzana.objects.all(), required=False)
     numero_lote = serializers.CharField(max_length=10, required=False)
@@ -146,7 +146,7 @@ class LoteUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lote
         fields = [
-            'manzana', 'numero_lote', 'metros_cuadrados', 'valor_total', 'costo_instalacion',
+            'manzana', 'numero_lote', 'identificador', 'metros_cuadrados', 'valor_total', 'costo_instalacion',
             'estado', 'activo', 'version'
         ]
 
