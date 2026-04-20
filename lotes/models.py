@@ -130,13 +130,17 @@ class Lote(models.Model):
     """
     Modelo para representar lotes disponibles para venta
     """
-    ESTADO_CHOICES = [
+    USO_LOTE_CHOICES = [
+        ('residencial', 'Residencial'),
+        ('comercial_y_bodega', 'Comercial y Bodega'),
+    ]
+
+    ESTADO_DISPONIBILIDAD_CHOICES = [
         ('disponible', 'Disponible'),
         ('reservado', 'Reservado'),
-        ('pagado', 'Pagado'),
-        ('comercial_y_bodega', 'Comercial y Bodega'),
         ('financiado', 'Financiado'),
-        ('pagado_y_escriturado', 'Pagado y Escriturado'),
+        ('pagado', 'Pagado'),
+        ('escriturado', 'Escriturado'),
     ]
 
     # Información básica
@@ -183,12 +187,18 @@ class Lote(models.Model):
         help_text='ID textual exacto del SVG para sobreescribir la vinculacion dinamica'
     )
     
-    # Estado y control
-    estado = models.CharField(
+    # Estado y uso
+    uso_lote = models.CharField(
+        max_length=25,
+        choices=USO_LOTE_CHOICES,
+        default='residencial',
+        verbose_name='Uso del Lote'
+    )
+    estado_disponibilidad = models.CharField(
         max_length=25, 
-        choices=ESTADO_CHOICES, 
+        choices=ESTADO_DISPONIBILIDAD_CHOICES, 
         default='disponible',
-        verbose_name='Estado del Lote'
+        verbose_name='Estado de Disponibilidad'
     )
     
     # Campo para control de concurrencia básico
@@ -216,7 +226,7 @@ class Lote(models.Model):
         indexes = [
             models.Index(fields=['identificador'], name='lotes_identificador_idx'),
             models.Index(fields=['plano_svg_id'], name='lotes_plano_svg_id_idx'),
-            models.Index(fields=['manzana', 'estado'], name='lotes_manzana_estado_idx'),
+            models.Index(fields=['manzana', 'estado_disponibilidad'], name='lotes_manzana_estado_idx'),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -298,8 +308,8 @@ class HistorialLote(models.Model):
     Modelo para registrar el historial de cambios de estado de los lotes
     """
     lote = models.ForeignKey(Lote, on_delete=models.CASCADE, related_name='historial', verbose_name='Lote')
-    estado_anterior = models.CharField(max_length=20, verbose_name='Estado Anterior')
-    estado_nuevo = models.CharField(max_length=20, verbose_name='Nuevo Estado')
+    estado_disponibilidad_anterior = models.CharField(max_length=25, default='disponible', verbose_name='Estado Disp. Anterior')
+    estado_disponibilidad_nuevo = models.CharField(max_length=25, default='disponible', verbose_name='Nuevo Estado Disp.')
     cambiado_por = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, verbose_name='Cambiado por')
     notas = models.TextField(blank=True, null=True, verbose_name='Notas')
     fecha_cambio = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de Cambio')
@@ -310,4 +320,4 @@ class HistorialLote(models.Model):
         ordering = ['-fecha_cambio']
 
     def __str__(self):
-        return f"Lote {self.lote.numero_lote} - {self.estado_anterior} → {self.estado_nuevo}"
+        return f"Lote {self.lote.numero_lote} - {self.estado_disponibilidad_anterior} → {self.estado_disponibilidad_nuevo}"

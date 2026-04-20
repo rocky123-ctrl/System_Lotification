@@ -21,6 +21,13 @@ def register_user(request):
     if serializer.is_valid():
         user = serializer.save()
         refresh = RefreshToken.for_user(user)
+
+        # Iniciar tracker de inactividad
+        from django.core.cache import cache
+        from django.conf import settings
+        timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 1200)
+        cache.set(f'last_activity_{user.id}', True, timeout=timeout_seconds)
+
         return Response({
             'message': 'Usuario registrado exitosamente',
             'user': UserSerializer(user).data,
@@ -44,6 +51,13 @@ def login_user(request):
         
         if user:
             refresh = RefreshToken.for_user(user)
+
+            # Iniciar tracker de inactividad
+            from django.core.cache import cache
+            from django.conf import settings
+            timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 1200)
+            cache.set(f'last_activity_{user.id}', True, timeout=timeout_seconds)
+
             return Response({
                 'message': 'Inicio de sesión exitoso',
                 'user': UserSerializer(user).data,
@@ -104,6 +118,11 @@ def logout_user(request):
         if refresh_token:
             token = RefreshToken(refresh_token)
             token.blacklist()
+            
+        # Destruir tracking de inactividad de Redis
+        from django.core.cache import cache
+        cache.delete(f'last_activity_{request.user.id}')
+        
         return Response({'message': 'Sesión cerrada exitosamente'})
     except Exception as e:
         return Response({'error': 'Error al cerrar sesión'}, status=status.HTTP_400_BAD_REQUEST)

@@ -54,14 +54,16 @@ class ManzanaSerializer(serializers.ModelSerializer):
         return obj.lotes.count()
     
     def get_lotes_disponibles(self, obj):
-        return obj.lotes.filter(estado='disponible', activo=True).count()
+        return obj.lotes.filter(estado_disponibilidad='disponible', activo=True).count()
 
 
 class LoteSerializer(serializers.ModelSerializer):
     """Serializer para lotes con respuestas JSON limpias"""
     manzana_nombre = serializers.CharField(source='manzana.nombre', read_only=True)
     lotificacion_nombre = serializers.CharField(source='manzana.lotificacion.nombre', read_only=True)
-    estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    lotificacion_id = serializers.IntegerField(source='manzana.lotificacion_id', read_only=True)
+    estado_disponibilidad_display = serializers.CharField(source='get_estado_disponibilidad_display', read_only=True)
+    uso_lote_display = serializers.CharField(source='get_uso_lote_display', read_only=True)
     saldo_financiar = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     actualizado_por_nombre = serializers.CharField(source='actualizado_por.get_full_name', read_only=True)
     
@@ -80,7 +82,8 @@ class LoteListSerializer(serializers.ModelSerializer):
     """Serializer para listar lotes con información básica"""
     manzana_nombre = serializers.CharField(source='manzana.nombre', read_only=True)
     lotificacion_nombre = serializers.CharField(source='manzana.lotificacion.nombre', read_only=True)
-    estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    estado_disponibilidad_display = serializers.CharField(source='get_estado_disponibilidad_display', read_only=True)
+    uso_lote_display = serializers.CharField(source='get_uso_lote_display', read_only=True)
     saldo_financiar = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     actualizado_por_nombre = serializers.SerializerMethodField()
 
@@ -89,6 +92,7 @@ class LoteListSerializer(serializers.ModelSerializer):
     costo_instalacion_formateado = serializers.CharField(read_only=True)
     saldo_financiar_formateado = serializers.CharField(read_only=True)
     metros_cuadrados_formateados = serializers.CharField(read_only=True)
+    lotificacion_id = serializers.IntegerField(source='manzana.lotificacion_id', read_only=True)
 
     def get_actualizado_por_nombre(self, obj):
         if obj.actualizado_por:
@@ -98,11 +102,12 @@ class LoteListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lote
         fields = [
-            'id', 'identificador', 'manzana', 'manzana_nombre', 'lotificacion_nombre', 
+            'id', 'identificador', 'plano_svg_id', 'manzana', 'manzana_nombre', 'lotificacion_nombre', 'lotificacion_id',
             'numero_lote', 'metros_cuadrados', 'metros_cuadrados_formateados', 
             'valor_total', 'valor_total_formateado', 
             'costo_instalacion', 'costo_instalacion_formateado', 'saldo_financiar', 
-            'saldo_financiar_formateado', 'estado', 'estado_display', 'version', 
+            'saldo_financiar_formateado', 'uso_lote', 'uso_lote_display', 
+            'estado_disponibilidad', 'estado_disponibilidad_display', 'version', 
             'actualizado_por', 'actualizado_por_nombre', 'activo', 
             'fecha_creacion', 'fecha_actualizacion'
         ]
@@ -114,7 +119,7 @@ class LotePlanoListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lote
-        fields = ['id', 'identificador', 'plano_svg_id', 'estado', 'activo', 'manzana', 'manzana_nombre']
+        fields = ['id', 'identificador', 'plano_svg_id', 'uso_lote', 'estado_disponibilidad', 'activo', 'manzana', 'manzana_nombre']
 
 
 class LoteCreateSerializer(serializers.ModelSerializer):
@@ -124,7 +129,7 @@ class LoteCreateSerializer(serializers.ModelSerializer):
         model = Lote
         fields = [
             'manzana', 'numero_lote', 'identificador', 'metros_cuadrados', 'valor_total', 
-            'costo_instalacion', 'estado'
+            'costo_instalacion', 'uso_lote', 'estado_disponibilidad'
         ]
     
     def validate(self, attrs):
@@ -147,7 +152,7 @@ class LoteUpdateSerializer(serializers.ModelSerializer):
         model = Lote
         fields = [
             'manzana', 'numero_lote', 'identificador', 'metros_cuadrados', 'valor_total', 'costo_instalacion',
-            'estado', 'activo', 'version'
+            'uso_lote', 'estado_disponibilidad', 'activo', 'version'
         ]
 
     def validate(self, attrs):
@@ -202,7 +207,8 @@ class LoteEstadisticasSerializer(serializers.Serializer):
 class LoteFiltroSerializer(serializers.Serializer):
     """Serializer para filtros de lotes"""
     manzana = serializers.CharField(required=False)
-    estado = serializers.CharField(required=False)
+    uso_lote = serializers.CharField(required=False)
+    estado_disponibilidad = serializers.CharField(required=False)
     precio_min = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     precio_max = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     metros_min = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)

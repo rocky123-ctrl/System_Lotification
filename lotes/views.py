@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class LotePagination(PageNumberPagination):
-    """Paginación opcional para lotes"""
-    page_size = 20
+    """Paginación para lotes"""
+    page_size = 8
     page_size_query_param = 'page_size'
     max_page_size = 100
     
@@ -559,7 +559,8 @@ class LoteViewSet(viewsets.ModelViewSet):
         lotificacion_id = self.request.query_params.get('lotificacion', None)
         manzana_id = self.request.query_params.get('manzana_id', None)
         manzana = self.request.query_params.get('manzana', None)
-        estado = self.request.query_params.get('estado', None)
+        uso_lote = self.request.query_params.get('uso_lote', None)
+        estado_disponibilidad = self.request.query_params.get('estado_disponibilidad', None)
         precio_min = self.request.query_params.get('precio_min', None)
         precio_max = self.request.query_params.get('precio_max', None)
         metros_min = self.request.query_params.get('metros_min', None)
@@ -577,8 +578,11 @@ class LoteViewSet(viewsets.ModelViewSet):
         if manzana:
             queryset = queryset.filter(manzana__nombre__icontains=manzana)
         
-        if estado:
-            queryset = queryset.filter(estado=estado)
+        if uso_lote:
+            queryset = queryset.filter(uso_lote=uso_lote)
+            
+        if estado_disponibilidad:
+            queryset = queryset.filter(estado_disponibilidad=estado_disponibilidad)
         
         if precio_min:
             queryset = queryset.filter(valor_total__gte=precio_min)
@@ -593,7 +597,7 @@ class LoteViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(metros_cuadrados__lte=metros_max)
         
         if solo_disponibles:
-            queryset = queryset.filter(estado='disponible')
+            queryset = queryset.filter(estado_disponibilidad='disponible')
         
         return queryset.order_by('manzana__lotificacion', 'manzana', 'numero_lote')
 
@@ -603,8 +607,8 @@ class LoteViewSet(viewsets.ModelViewSet):
         API 4: Actualizar estado del lote con control de concurrencia
         """
         instance = serializer.instance
-        old_status = instance.estado
-        new_status = serializer.validated_data.get('estado', old_status)
+        old_status = instance.estado_disponibilidad
+        new_status = serializer.validated_data.get('estado_disponibilidad', old_status)
         
         # Usar select_for_update para bloqueo de fila en la base de datos
         with transaction.atomic():
@@ -630,10 +634,10 @@ class LoteViewSet(viewsets.ModelViewSet):
             if old_status != new_status:
                 HistorialLote.objects.create(
                     lote=lote,
-                    estado_anterior=old_status,
-                    estado_nuevo=new_status,
+                    estado_disponibilidad_anterior=old_status,
+                    estado_disponibilidad_nuevo=new_status,
                     cambiado_por=self.request.user,
-                    notas=f"Estado cambiado de {old_status} a {new_status}"
+                    notas=f"Estado de disponibilidad cambiado de {old_status} a {new_status}"
                 )
         
         return lote
@@ -714,26 +718,26 @@ class LoteViewSet(viewsets.ModelViewSet):
                 )
             
             # Validar que el lote esté disponible (no RESERVADO ni VENDIDO)
-            if lote.estado in ['reservado', 'pagado', 'pagado_y_escriturado']:
+            if lote.estado_disponibilidad != 'disponible':
                 return Response(
                     {
-                        'error': f'El lote no puede ser reservado. Estado actual: {lote.get_estado_display()}',
-                        'estado_actual': lote.estado,
+                        'error': f'El lote no puede ser reservado. Estado actual: {lote.get_estado_disponibilidad_display()}',
+                        'estado_actual': lote.estado_disponibilidad,
                         'mensaje': 'Solo se pueden reservar lotes con estado DISPONIBLE'
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
             # Cambiar estado a RESERVADO
-            estado_anterior = lote.estado
-            lote.estado = 'reservado'
+            estado_anterior = lote.estado_disponibilidad
+            lote.estado_disponibilidad = 'reservado'
             lote.save(user=request.user)  # Guardar con usuario para auditoría
             
             # Registrar en historial
             HistorialLote.objects.create(
                 lote=lote,
-                estado_anterior=estado_anterior,
-                estado_nuevo='reservado',
+                estado_disponibilidad_anterior=estado_anterior,
+                estado_disponibilidad_nuevo='reservado',
                 cambiado_por=request.user,
                 notas=notas or 'Lote reservado'
             )
@@ -755,7 +759,7 @@ class LoteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def cambiar_estado(self, request, pk=None):
-        """Cambiar estado de un lote con notas"""
+        """Cambiar estado de disponibilidad de un lote con notas"""
         lote = self.get_object()
         nuevo_estado = request.data.get('estado')
         notas = request.data.get('notas', '')
@@ -766,21 +770,21 @@ class LoteViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        if nuevo_estado not in dict(Lote.ESTADO_CHOICES):
+        if nuevo_estado not in dict(Lote.ESTADO_DISPONIBILIDAD_CHOICES):
             return Response(
-                {'error': 'Estado no válido'}, 
+                {'error': 'Estado de disponibilidad no válido'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        estado_anterior = lote.estado
-        lote.estado = nuevo_estado
+        estado_anterior = lote.estado_disponibilidad
+        lote.estado_disponibilidad = nuevo_estado
         lote.save()
         
         # Registrar en historial
         HistorialLote.objects.create(
             lote=lote,
-            estado_anterior=estado_anterior,
-            estado_nuevo=nuevo_estado,
+            estado_disponibilidad_anterior=estado_anterior,
+            estado_disponibilidad_nuevo=nuevo_estado,
             cambiado_por=request.user,
             notas=notas
         )
@@ -791,7 +795,7 @@ class LoteViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def disponibles(self, request):
         """Obtener solo lotes disponibles"""
-        lotes = self.get_queryset().filter(estado='disponible')
+        lotes = self.get_queryset().filter(estado_disponibilidad='disponible')
         serializer = LoteListSerializer(lotes, many=True)
         return Response(serializer.data)
 
@@ -802,16 +806,16 @@ class LoteViewSet(viewsets.ModelViewSet):
         
         stats = {
             'total_lotes': lotes.count(),
-            'lotes_disponibles': lotes.filter(estado='disponible').count(),
-            'lotes_reservados': lotes.filter(estado='reservado').count(),
-            'lotes_pagados': lotes.filter(estado='pagado').count(),
-            'lotes_comercial_bodega': lotes.filter(estado='comercial_y_bodega').count(),
-            'lotes_financiados': lotes.filter(estado='financiado').count(),
-            'lotes_pagado_escriturado': lotes.filter(estado='pagado_y_escriturado').count(),
-            'valor_total_inventario': lotes.filter(estado='disponible').aggregate(
+            'lotes_disponibles': lotes.filter(estado_disponibilidad='disponible').count(),
+            'lotes_reservados': lotes.filter(estado_disponibilidad='reservado').count(),
+            'lotes_pagados': lotes.filter(estado_disponibilidad='pagado').count(),
+            'lotes_comercial_bodega': lotes.filter(uso_lote='comercial_y_bodega').count(),
+            'lotes_financiados': lotes.filter(estado_disponibilidad='financiado').count(),
+            'lotes_pagado_escriturado': lotes.filter(estado_disponibilidad='escriturado').count(),
+            'valor_total_inventario': lotes.filter(estado_disponibilidad='disponible').aggregate(
                 total=Sum('valor_total')
             )['total'] or Decimal('0.00'),
-            'valor_total_vendido': lotes.filter(estado__in=['pagado', 'pagado_y_escriturado']).aggregate(
+            'valor_total_vendido': lotes.filter(estado_disponibilidad__in=['pagado', 'escriturado']).aggregate(
                 total=Sum('valor_total')
             )['total'] or Decimal('0.00'),
             'promedio_metros_cuadrados': lotes.aggregate(
@@ -843,7 +847,7 @@ class HistorialLoteViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(lote_id=lote_id)
         
         if estado:
-            queryset = queryset.filter(estado_nuevo=estado)
+            queryset = queryset.filter(estado_disponibilidad_nuevo=estado)
         
         if fecha_desde:
             queryset = queryset.filter(fecha_cambio__gte=fecha_desde)

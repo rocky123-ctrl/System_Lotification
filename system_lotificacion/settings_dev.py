@@ -1,4 +1,5 @@
 """
+#settings_dev.py
 Configuración de Django para desarrollo local.
 Este archivo está optimizado para desarrollo con python manage.py runserver
 """
@@ -7,6 +8,8 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from urllib.parse import urlparse
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,6 +43,7 @@ INSTALLED_APPS = [
     'lotes',
     'configuracion',
     'financiamiento',
+    'ventas',
 ]
 
 MIDDLEWARE = [
@@ -134,8 +138,7 @@ AUTH_USER_MODEL = 'auth.User'
 # Django REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
+        'authentication.authentication.InactivityJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -150,8 +153,8 @@ REST_FRAMEWORK = {
 
 # JWT Settings
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get("JWT_ACCESS_TOKEN_LIFETIME", 15))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get("JWT_REFRESH_TOKEN_LIFETIME", 1440))),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
@@ -271,6 +274,9 @@ EMAIL_PORT = 1025
 EMAIL_USE_TLS = False
 EMAIL_HOST_USER = ''
 EMAIL_HOST_PASSWORD = ''
+
+# Inactivity setting
+INACTIVITY_TIMEOUT_SECONDS = int(os.environ.get("INACTIVITY_TIMEOUT_SECONDS", 3600))
 
 # File upload settings
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB

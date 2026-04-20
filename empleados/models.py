@@ -10,7 +10,6 @@ class Empleado(models.Model):
     direccion = models.TextField(null=True, blank=True)
     fecha_contratacion = models.DateField()
     rol = models.CharField(max_length=20)
-    sueldo = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     porcentaje_comision = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     estado = models.BooleanField(default=True)
     usuario = models.OneToOneField(User, on_delete=models.CASCADE, null=True, blank=True)

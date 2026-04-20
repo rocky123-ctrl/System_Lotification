@@ -32,17 +32,17 @@ class ManzanaAdmin(admin.ModelAdmin):
 class LoteAdmin(admin.ModelAdmin):
     list_display = (
         'identificador', 'numero_lote', 'manzana', 'metros_cuadrados', 'valor_total', 
-        'estado', 'version', 'actualizado_por', 'activo', 'fecha_creacion'
+        'uso_lote', 'estado_disponibilidad', 'version', 'actualizado_por', 'activo', 'fecha_creacion'
     )
-    list_filter = ('manzana__lotificacion', 'manzana', 'estado', 'activo', 'fecha_creacion', 'actualizado_por')
+    list_filter = ('manzana__lotificacion', 'manzana', 'uso_lote', 'estado_disponibilidad', 'activo', 'fecha_creacion', 'actualizado_por')
     search_fields = ('identificador', 'numero_lote', 'manzana__nombre', 'manzana__lotificacion__nombre')
     ordering = ('manzana__lotificacion', 'manzana', 'numero_lote')
-    list_editable = ('estado', 'activo')
+    list_editable = ('uso_lote', 'estado_disponibilidad', 'activo')
     readonly_fields = ('saldo_financiar', 'version', 'fecha_creacion', 'fecha_actualizacion')
     
     fieldsets = (
         ('Información Básica', {
-            'fields': ('manzana', 'numero_lote', 'identificador', 'metros_cuadrados', 'estado')
+            'fields': ('manzana', 'numero_lote', 'identificador', 'metros_cuadrados', 'uso_lote', 'estado_disponibilidad')
         }),
         ('Información Financiera', {
             'fields': ('valor_total', 'costo_instalacion', 'saldo_financiar')
@@ -104,7 +104,7 @@ class LoteAdmin(admin.ModelAdmin):
             queryset = queryset.filter(activo=True)
         
         if datos_form['solo_disponibles']:
-            queryset = queryset.filter(estado='disponible')
+            queryset = queryset.filter(estado_disponibilidad='disponible')
         
         # Preparar datos para exportación
         datos_exportacion = []
@@ -117,7 +117,8 @@ class LoteAdmin(admin.ModelAdmin):
                 'metros_cuadrados': float(lote.metros_cuadrados),
                 'valor_total': float(lote.valor_total),
                 'costo_instalacion': float(lote.costo_instalacion),
-                'estado': lote.estado,
+                'uso_lote': lote.uso_lote,
+                'estado_disponibilidad': lote.estado_disponibilidad,
                 'version': lote.version,
                 'activo': lote.activo,
                 'fecha_creacion': lote.fecha_creacion.strftime('%Y-%m-%d %H:%M:%S'),
@@ -159,8 +160,8 @@ class LoteAdmin(admin.ModelAdmin):
 
 @admin.register(HistorialLote)
 class HistorialLoteAdmin(admin.ModelAdmin):
-    list_display = ('lote', 'estado_anterior', 'estado_nuevo', 'cambiado_por', 'fecha_cambio')
-    list_filter = ('estado_nuevo', 'fecha_cambio')
+    list_display = ('lote', 'estado_disponibilidad_anterior', 'estado_disponibilidad_nuevo', 'cambiado_por', 'fecha_cambio')
+    list_filter = ('estado_disponibilidad_nuevo', 'fecha_cambio')
     search_fields = ('lote__numero_lote', 'lote__manzana__nombre', 'cambiado_por__username')
     ordering = ('-fecha_cambio',)
     readonly_fields = ('fecha_cambio',)

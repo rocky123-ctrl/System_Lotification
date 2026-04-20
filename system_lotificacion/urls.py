@@ -31,6 +31,8 @@ urlpatterns = [
     path('api/configuracion/', include('configuracion.urls')),
     path('api/financiamiento/', include('financiamiento.urls')),
     path('api/empleados/', include('empleados.urls')),
+    path('api/ventas/', include('ventas.urls')),
+    path('api/cuentas-cobrar/', include('cuentas_cobrar.urls')),
 ]
 
 # Servir archivos estáticos y media en desarrollo
