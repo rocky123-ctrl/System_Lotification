@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     # Third party apps
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
 
@@ -64,6 +65,7 @@ INSTALLED_APPS = [
     "empleados",
     "cuentas_cobrar",
     "ventas",
+    "servicios",
 ]
 
 MIDDLEWARE = [
@@ -265,7 +267,10 @@ CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
-        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": True, # Evita que la app de 500 si Redis cae
+        }
     }
 }
 

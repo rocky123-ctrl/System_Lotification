@@ -12,7 +12,7 @@ from io import BytesIO
 
 @admin.register(Lotificacion)
 class LotificacionAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'ubicacion', 'activo', 'fecha_creacion')
+    list_display = ('nombre', 'logo', 'ubicacion', 'activo', 'fecha_creacion')
     list_filter = ('activo', 'fecha_creacion')
     search_fields = ('nombre', 'descripcion', 'ubicacion')
     ordering = ('nombre',)

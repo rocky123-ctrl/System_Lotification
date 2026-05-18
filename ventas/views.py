@@ -53,6 +53,7 @@ class VentaViewSet(viewsets.ModelViewSet):
         mes = self.request.query_params.get('mes')
         search = self.request.query_params.get('search')
         lotificacion = self.request.query_params.get('lotificacion')
+        estado = self.request.query_params.get('estado')
 
         if anio:
             queryset = queryset.filter(fecha_creacion__year=anio)
@@ -60,6 +61,11 @@ class VentaViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(fecha_creacion__month=mes)
         if lotificacion:
             queryset = queryset.filter(lote__manzana__lotificacion_id=lotificacion)
+        if estado:
+            if estado == 'ACTIVAS':
+                queryset = queryset.filter(estado__in=['GENERADA', 'COMPLETADA'])
+            else:
+                queryset = queryset.filter(estado=estado)
         if search:
             queryset = queryset.filter(
                 Q(cliente__nombres__icontains=search) |
@@ -70,57 +76,180 @@ class VentaViewSet(viewsets.ModelViewSet):
         return queryset.order_by('-fecha_creacion')
 
     def perform_create(self, serializer):
+        # Asignar automáticamente el estado según el tipo de pago
+        tipo_pago = self.request.data.get('tipo_pago', '').upper()
+        estado = 'COMPLETADA' if tipo_pago == 'CONTADO' else 'GENERADA'
+        
         # Asignar automáticamente el vendedor como el usuario activo
-        serializer.save(vendedor=self.request.user)
+        serializer.save(vendedor=self.request.user, estado=estado)
+
+
 
     def perform_destroy(self, instance):
         """
-        Al eliminar una venta, debemos devolver el lote a 'disponible'
-        y limpiar cualquier financiamiento activo si existiera.
+        En lugar de eliminar físicamente, cambiamos el estado a 'CANCELADA' (Soft-Cancel)
+        y liberamos el lote.
+        También borramos las cuotas y servicios contratados del cliente en el lote.
         """
         from django.db import transaction
         from lotes.models import HistorialLote
         from financiamiento.models import Financiamiento
+        from cuentas_cobrar.models import Cuota
+        from servicios.models import ConfiguracionServicioLote, PagoServicio
         
+        if instance.estado == 'CANCELADA':
+            return 
+
         with transaction.atomic():
             lote = instance.lote
             estado_anterior = lote.estado_disponibilidad
             
-            # 1. Liberar el lote
+            # 1. Cambiar estado de la venta
+            instance.estado = 'CANCELADA'
+            instance.save()
+
+            # 2. Liberar el lote
             lote.estado_disponibilidad = 'disponible'
             lote.save()
             
-            # 2. Registrar en historial
+            # 3. Registrar en historial de lote
             HistorialLote.objects.create(
                 lote=lote,
                 estado_disponibilidad_anterior=estado_anterior,
                 estado_disponibilidad_nuevo='disponible',
-                notas=f"Venta ID {instance.id} eliminada por {self.request.user.username}. Lote liberado."
+                notas=f"Venta ID {instance.id} marcada como CANCELADA por {self.request.user.username}. Lote liberado."
             )
             
-            # 3. Eliminar financiamiento si existe para este lote
-            # (El modelo Financiamiento tiene OneToOne con Lote y on_delete=CASCADE lo borrará si borramos lote, 
-            # pero aquí borramos la Venta, así que debemos borrar el Financiamiento manualmente)
+            # 4. Eliminar financiamiento y cuotas
             Financiamiento.objects.filter(lote=lote).delete()
+            Cuota.objects.filter(venta=instance).delete()
             
-            # 4. Eliminar la venta
-            instance.delete()
+            # 5. Eliminar servicios contratados de ese cliente en ese lote
+            ConfiguracionServicioLote.objects.filter(lote=lote).delete()
+            PagoServicio.objects.filter(lote=lote).delete()
+
+    @action(detail=True, methods=['post'])
+    def restaurar(self, request, pk=None):
+        """
+        Restaura una venta cancelada si el lote sigue disponible.
+        """
+        from django.db import transaction
+        from lotes.models import HistorialLote
+        from financiamiento.models import Financiamiento
+        import math
+
+        instance = self.get_object()
+        if instance.estado != 'CANCELADA':
+            return Response({"error": "Solo se pueden restaurar ventas canceladas."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        lote = instance.lote
+        if lote.estado_disponibilidad != 'disponible':
+            return Response({"error": "El lote ya no está disponible para ser restaurado (actualmente: " + lote.estado_disponibilidad + ")."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # 1. Determinar nuevo estado oficial
+            nuevo_estado = 'COMPLETADA' if instance.tipo_pago == 'CONTADO' else 'GENERADA'
+            instance.estado = nuevo_estado
+            instance.save()
+
+            # 2. Ocupar el lote
+            estado_nuevo_lote = 'pagado' if instance.tipo_pago == 'CONTADO' else 'financiado'
+            lote.estado_disponibilidad = estado_nuevo_lote
+            lote.save()
+
+            # 3. Registrar historial
+            HistorialLote.objects.create(
+                lote=lote,
+                estado_disponibilidad_anterior='disponible',
+                estado_disponibilidad_nuevo=estado_nuevo_lote,
+                notas=f"Venta ID {instance.id} RESTAURADA por {self.request.user.username}."
+            )
+
+            # 4. Re-crear financiamiento si es necesario
+            if instance.tipo_pago == 'FINANCIADO':
+                tasa_anual = float(instance.tasa_interes_anual) / 100.0
+                tasa_mensual = math.pow(1 + tasa_anual, 1/12) - 1
+                valor_financiar = float(instance.monto_financiar)
+                
+                if tasa_mensual > 0:
+                    cuota = (valor_financiar * tasa_mensual * math.pow(1 + tasa_mensual, instance.plazo_meses)) / (math.pow(1 + tasa_mensual, instance.plazo_meses) - 1)
+                else:
+                    cuota = valor_financiar / instance.plazo_meses
+
+                Financiamiento.objects.create(
+                    lote=lote,
+                    cliente=instance.cliente,
+                    vendedor=instance.vendedor,
+                    monto_total=instance.monto_financiar,
+                    plazo_meses=instance.plazo_meses,
+                    tasa_interes_anual=instance.tasa_interes_anual,
+                    cuota_mensual=round(cuota, 2),
+                    dia_pago=instance.fecha_creacion.day if instance.fecha_creacion else 1,
+                    estado='activo'
+                )
+
+        return Response(self.get_serializer(instance).data)
+
+    @action(detail=True, methods=['post'])
+    def escriturar(self, request, pk=None):
+        from django.db import transaction
+        from lotes.models import HistorialLote
+
+        instance = self.get_object()
+        if instance.estado != 'COMPLETADA':
+            return Response({"error": "Solo se pueden escriturar ventas completadas."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        lote = instance.lote
+        if lote.estado_disponibilidad == 'escriturado':
+            return Response({"error": "Este lote ya se encuentra escriturado."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        with transaction.atomic():
+            estado_anterior = lote.estado_disponibilidad
+            lote.estado_disponibilidad = 'escriturado'
+            lote.save()
+            
+            HistorialLote.objects.create(
+                lote=lote,
+                estado_disponibilidad_anterior=estado_anterior,
+                estado_disponibilidad_nuevo='escriturado',
+                notas=f"Lote escriturado desde la venta {instance.id} por {self.request.user.username}."
+            )
+            
+        return Response({"mensaje": "Lote escriturado correctamente.", "nuevo_estado_lote": "escriturado"})
+
+    @action(detail=True, methods=['post'])
+    def eliminar_permanente(self, request, pk=None):
+        """
+        Elimina físicamente el registro de la base de datos.
+        Solo permitido si ya está en estado CANCELADA.
+        """
+        instance = self.get_object()
+        if instance.estado != 'CANCELADA':
+            return Response({"error": "Solo se pueden eliminar permanentemente las ventas que ya están CANCELADAS."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['get'])
     def resumen(self, request):
         """
         Devuelve totales de ventas y comisiones para el usuario activo
         basado en los filtros aplicados.
+        Excluye las ventas CANCELADAS de los totales.
         """
         queryset = self.filter_queryset(self.get_queryset())
-        totales = queryset.aggregate(
+        
+        # Filtramos explícitamente para excluir canceladas de los cálculos monetarios
+        queryset_para_totales = queryset.exclude(estado='CANCELADA')
+        
+        totales = queryset_para_totales.aggregate(
             total_ventas=Sum('valor_lote'),
             total_comisiones=Sum('comision_monto')
         )
         return Response({
             'total_ventas': totales['total_ventas'] or 0,
             'total_comisiones': totales['total_comisiones'] or 0,
-            'conteo': queryset.count()
+            'conteo': queryset_para_totales.count()
         })
 
     @action(detail=False, methods=['post'])
@@ -131,13 +260,17 @@ class VentaViewSet(viewsets.ModelViewSet):
         """
         try:
             valor_lote = Decimal(str(request.data.get('valor_lote', 0)))
+            acepta_instalacion = request.data.get('acepta_instalacion', False)
+            costo_instalacion = Decimal(str(request.data.get('costo_instalacion', 0)))
             enganche = Decimal(str(request.data.get('enganche', 0)))
             descuento = Decimal(str(request.data.get('descuento', 0)))
             tipo_pago = str(request.data.get('tipo_pago', 'contado')).lower()
             plazo_meses = int(request.data.get('plazo_meses', 0))
             tasa_interes = float(request.data.get('tasa_interes', 0))
 
-            valor_con_descuento = max(Decimal('0'), valor_lote - descuento)
+            # Ajustar valor base si se acepta instalación
+            valor_base_calculo = valor_lote + (costo_instalacion if acepta_instalacion else Decimal('0'))
+            valor_con_descuento = max(Decimal('0'), valor_base_calculo - descuento)
             valor_financiar = max(Decimal('0'), valor_con_descuento - enganche)
 
             # Tasa Efectiva Mensual = (1 + Tasa Anual Decimal)^(1/12) - 1
@@ -190,13 +323,16 @@ class LiquidacionComisionViewSet(viewsets.ModelViewSet):
         mes = self.request.query_params.get('mes')
         search = self.request.query_params.get('search')
         estado = self.request.query_params.get('estado')
+        vendedor_id = self.request.query_params.get('vendedor')
 
-        if anio:
+        if anio and anio != 'all':
             queryset = queryset.filter(venta__fecha_creacion__year=anio)
-        if mes:
+        if mes and mes != 'all':
             queryset = queryset.filter(venta__fecha_creacion__month=mes)
-        if estado:
+        if estado and estado != 'all':
             queryset = queryset.filter(estado_pago=estado)
+        if vendedor_id:
+            queryset = queryset.filter(vendedor_id=vendedor_id)
         if search:
             queryset = queryset.filter(
                 Q(vendedor__first_name__icontains=search) |
@@ -223,6 +359,77 @@ class LiquidacionComisionViewSet(viewsets.ModelViewSet):
         instance.save()
         
         return Response(self.get_serializer(instance).data)
+
+    @action(detail=False, methods=['get'])
+    def resumen_por_vendedor(self, request):
+        anio = request.query_params.get('anio')
+        mes = request.query_params.get('mes')
+        
+        if not anio or not mes or str(anio) == 'all' or str(mes) == 'all':
+            return Response({'error': 'Debe especificar año y mes válidos.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        from django.db.models import Sum, Count, Q, F
+        
+        resumen = queryset.values(
+            'vendedor_id',
+        ).annotate(
+            vendedor_username=F('vendedor__username'),
+            user_first_name=F('vendedor__first_name'),
+            user_last_name=F('vendedor__last_name'),
+            empleado_nombre=F('vendedor__empleado__nombre'),
+            empleado_apellido=F('vendedor__empleado__apellido'),
+            total_comisiones=Sum('monto_pagado'),
+            monto_pendiente=Sum('monto_pagado', filter=Q(estado_pago='PENDIENTE')),
+            monto_pagado_total=Sum('monto_pagado', filter=Q(estado_pago='PAGADO')),
+            cantidad_ventas=Count('id'),
+            cantidad_pendientes=Count('id', filter=Q(estado_pago='PENDIENTE'))
+        ).order_by('-total_comisiones')
+        
+        resultados = []
+        for item in resumen:
+            if item.get('empleado_nombre'):
+                nombre = f"{item['empleado_nombre']} {item.get('empleado_apellido') or ''}".strip()
+            elif item.get('user_first_name'):
+                nombre = f"{item['user_first_name']} {item.get('user_last_name') or ''}".strip()
+            else:
+                nombre = item.get('vendedor_username')
+                
+            resultados.append({
+                'vendedor_id': item['vendedor_id'],
+                'vendedor_nombre': nombre,
+                'total_comisiones': float(item['total_comisiones'] or 0),
+                'monto_pendiente': float(item['monto_pendiente'] or 0),
+                'monto_pagado': float(item['monto_pagado_total'] or 0),
+                'cantidad_ventas': item['cantidad_ventas'],
+                'cantidad_pendientes': item['cantidad_pendientes']
+            })
+            
+        return Response(resultados)
+
+    @action(detail=False, methods=['post'])
+    def pagar_multiples(self, request):
+        ids = request.data.get('ids', [])
+        referencia = request.data.get('referencia_pago', '')
+        
+        if not ids or not isinstance(ids, list):
+            return Response({'error': 'Debe proporcionar una lista de IDs.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        liquidaciones = LiquidacionComision.objects.filter(id__in=ids, estado_pago='PENDIENTE')
+        cantidad = liquidaciones.count()
+        
+        if cantidad == 0:
+             return Response({'error': 'No se encontraron liquidaciones pendientes para los IDs proporcionados.'}, status=status.HTTP_400_BAD_REQUEST)
+             
+        liquidaciones.update(
+            estado_pago='PAGADO',
+            fecha_pago=timezone.now().date(),
+            es_pago_inmediato=True,
+            referencia_pago=referencia
+        )
+        
+        return Response({'mensaje': f'Se registraron {cantidad} pagos exitosamente.'}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def exportar_excel(self, request):
@@ -292,11 +499,24 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         )
 
         if is_super and all_cotizaciones:
-            queryset = Cotizacion.objects.all().select_related('cliente', 'lote', 'vendedor')
+            queryset = Cotizacion.objects.all().select_related('cliente', 'lote__manzana__lotificacion', 'vendedor')
         else:
-            queryset = Cotizacion.objects.filter(vendedor=user).select_related('cliente', 'lote', 'vendedor')
+            queryset = Cotizacion.objects.filter(vendedor=user).select_related('cliente', 'lote__manzana__lotificacion', 'vendedor')
 
         search = self.request.query_params.get('search')
+        estado = self.request.query_params.get('estado')
+        lotificacion = self.request.query_params.get('lotificacion')
+
+        if estado:
+            queryset = queryset.filter(estado=estado)
+        
+        if lotificacion:
+            queryset = queryset.filter(lote__manzana__lotificacion_id=lotificacion)
+        
+        if not search and not estado and not lotificacion:
+            # Si no hay búsqueda ni estado ni lotificación, dejamos el comportamiento base
+            pass
+
         if search:
             queryset = queryset.filter(
                 Q(cliente__nombres__icontains=search) |
@@ -314,7 +534,13 @@ class CotizacionViewSet(viewsets.ModelViewSet):
     def convertir_a_venta(self, request, pk=None):
         cotizacion = self.get_object()
 
-        if cotizacion.fecha_vencimiento < timezone.now().date():
+        # Validaciones de Estado
+        if cotizacion.estado != 'PENDIENTE':
+             return Response({'error': f'La cotización no se puede vender porque está en estado: {cotizacion.estado}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if cotizacion.es_vencida:
+            cotizacion.estado = 'VENCIDA'
+            cotizacion.save()
             return Response({'error': 'La cotización ha vencido.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if not cotizacion.cliente:
@@ -323,7 +549,6 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         # Usar transacciones atómicas para cambiar estado
         from django.db import transaction
         with transaction.atomic():
-            # Verificamos lote y solicitamos bloqueo (si el user cambia concurrentemente, se evita conflicto, aunque simple fetch works for now)
             if cotizacion.lote.estado_disponibilidad != 'disponible':
                 return Response({'error': f'El lote {cotizacion.lote.numero_lote} ya no está disponible.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -344,9 +569,39 @@ class CotizacionViewSet(viewsets.ModelViewSet):
                     vendedor=cotizacion.vendedor
                 )
                 nueva_venta.save()
+                
+                # Marcar cotización como ACEPTADA
+                cotizacion.estado = 'ACEPTADA'
+                cotizacion.save()
+                
                 return Response({'mensaje': 'Venta creada exitosamente', 'venta_id': nueva_venta.id}, status=status.HTTP_201_CREATED)
             except Exception as e:
                 return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def rechazar(self, request, pk=None):
+        cotizacion = self.get_object()
+        if cotizacion.estado == 'ACEPTADA':
+            return Response({'error': 'No se puede rechazar una cotización ya aceptada.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        cotizacion.estado = 'RECHAZADA'
+        cotizacion.save()
+        return Response({'mensaje': 'Cotización rechazada exitosamente.'})
+
+    @action(detail=True, methods=['post'])
+    def restaurar(self, request, pk=None):
+        cotizacion = self.get_object()
+        if cotizacion.estado != 'RECHAZADA':
+            return Response({'error': 'Solo se pueden restaurar cotizaciones rechazadas.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if cotizacion.es_vencida:
+            cotizacion.estado = 'VENCIDA'
+            cotizacion.save()
+            return Response({'error': 'La cotización se restauró pero está VENCIDA por fecha.'}, status=status.HTTP_200_OK)
+        
+        cotizacion.estado = 'PENDIENTE'
+        cotizacion.save()
+        return Response({'mensaje': 'Cotización restaurada a PENDIENTE.'})
 
     @action(detail=True, methods=['get'])
     def exportar_excel(self, request, pk=None):
@@ -503,3 +758,4 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{user_filename}"'
         wb.save(response)
         return response
+

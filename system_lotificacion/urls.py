@@ -33,6 +33,7 @@ urlpatterns = [
     path('api/empleados/', include('empleados.urls')),
     path('api/ventas/', include('ventas.urls')),
     path('api/cuentas-cobrar/', include('cuentas_cobrar.urls')),
+    path('api/servicios/', include('servicios.urls')),
 ]
 
 # Servir archivos estáticos y media en desarrollo

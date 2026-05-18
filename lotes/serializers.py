@@ -134,11 +134,9 @@ class LoteCreateSerializer(serializers.ModelSerializer):
     
     def validate(self, attrs):
         valor_total = attrs.get('valor_total', 0)
-        costo_instalacion = attrs.get('costo_instalacion', 0)
-        if valor_total is not None and costo_instalacion is not None:
-            saldo = valor_total - costo_instalacion
-            if saldo <= 0:
-                raise serializers.ValidationError("El saldo a financiar debe ser mayor a 0")
+        if valor_total is not None:
+            if valor_total <= 0:
+                raise serializers.ValidationError("El valor total del lote debe ser mayor a 0")
         return attrs
 
 
@@ -170,11 +168,9 @@ class LoteUpdateSerializer(serializers.ModelSerializer):
                     'manzana': 'La manzana debe pertenecer a la misma lotificación del lote.'
                 })
         valor_total = attrs.get('valor_total', instance.valor_total if instance else None)
-        costo_instalacion = attrs.get('costo_instalacion', instance.costo_instalacion if instance else None)
-        if valor_total is not None and costo_instalacion is not None:
-            saldo = valor_total - costo_instalacion
-            if saldo <= 0:
-                raise serializers.ValidationError("El saldo a financiar debe ser mayor a 0")
+        if valor_total is not None:
+            if valor_total <= 0:
+                raise serializers.ValidationError("El valor total del lote debe ser mayor a 0")
         return attrs
 
 

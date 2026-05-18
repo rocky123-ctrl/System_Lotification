@@ -24741,3 +24741,10 @@ INFO 2026-04-20 12:20:18,748 autoreload 16652 14816 C:\GITHUB\system_lotificatio
 INFO 2026-04-20 12:20:20,118 autoreload 9696 18312 Watching for file changes with StatReloader
 INFO 2026-04-20 12:57:12,534 autoreload 9696 18312 C:\GITHUB\system_lotification-main\system_lotification-main\system_lotificacion\settings_dev_simple.py changed, reloading.
 INFO 2026-04-20 12:57:13,739 autoreload 11480 13368 Watching for file changes with StatReloader
+INFO 2026-04-20 18:26:04,557 autoreload 10692 11852 Watching for file changes with StatReloader
+INFO 2026-04-20 18:26:38,200 autoreload 1508 14568 Watching for file changes with StatReloader
+INFO 2026-04-20 18:29:08,062 autoreload 17920 9328 Watching for file changes with StatReloader
+INFO 2026-04-20 18:29:23,163 basehttp 17920 10348 "OPTIONS /api/auth/login/ HTTP/1.1" 200 0
+INFO 2026-04-20 18:29:25,412 basehttp 17920 10348 "POST /api/auth/login/ HTTP/1.1" 200 812
+INFO 2026-04-20 18:29:35,363 basehttp 17920 10348 "OPTIONS /api/auth/logout/ HTTP/1.1" 200 0
+INFO 2026-04-20 18:29:35,382 basehttp 17920 10348 "POST /api/auth/logout/ HTTP/1.1" 200 42

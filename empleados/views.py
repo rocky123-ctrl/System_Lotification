@@ -29,7 +29,9 @@ class EmpleadoViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
+        instance.estado = False
+        instance.save()
         user = instance.usuario
-        instance.delete()
         if user:
-            user.delete()
+            user.is_active = False
+            user.save()

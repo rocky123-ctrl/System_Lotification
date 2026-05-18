@@ -12,6 +12,13 @@ class Venta(models.Model):
         ('EFECTIVO', 'Efectivo'),
         ('TARJETA', 'Tarjeta'),
         ('TRANSFERENCIA', 'Transferencia'),
+        ('DEPOSITO', 'Depósito'),
+    ]
+
+    ESTADO_VENTA_CHOICES = [
+        ('GENERADA', 'Generada'),
+        ('COMPLETADA', 'Completada'),
+        ('CANCELADA', 'Cancelada'),
     ]
 
     cliente = models.ForeignKey(
@@ -38,6 +45,12 @@ class Venta(models.Model):
     forma_pago = models.CharField(max_length=20, choices=FORMA_PAGO_CHOICES, default='EFECTIVO', verbose_name='Forma de Pago')
     acepta_instalacion = models.BooleanField(default=False, verbose_name='Acepta Instalación')
     plazo_meses = models.IntegerField(default=0, verbose_name='Plazo en Meses')
+    estado = models.CharField(
+        max_length=20, 
+        choices=ESTADO_VENTA_CHOICES, 
+        default='GENERADA',
+        verbose_name='Estado de la Venta'
+    )
 
     vendedor = models.ForeignKey(
         'auth.User',
@@ -53,6 +66,11 @@ class Venta(models.Model):
         default=0,
         verbose_name='Monto de Comisión'
     )
+
+    # Campos calculados para optimización (Evita JOINs pesados)
+    total_pagado_calculado = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='Total Pagado')
+    saldo_pendiente_calculado = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='Saldo Pendiente')
+    cuotas_vencidas_calculado = models.IntegerField(default=0, verbose_name='Cuotas Vencidas')
 
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
@@ -73,8 +91,9 @@ class Venta(models.Model):
                 raise ValidationError(f"El lote {self.lote.numero_lote} no está disponible para venta. Estado actual: {self.lote.get_estado_disponibilidad_display()}")
 
         # Re-calcular monto a financiar (Verdad lógica en el servidor)
-        # Ignoramos lo enviado por el frontend para mayor seguridad.
-        monto_calculado = self.valor_lote - self.enganche - self.descuento
+        # Se incluye el costo de instalación si se aceptó
+        costo_instalacion = self.lote.costo_instalacion if self.acepta_instalacion else Decimal('0.00')
+        monto_calculado = (self.valor_lote + costo_instalacion) - self.enganche - self.descuento
         
         if self.tipo_pago == 'FINANCIADO':
             if self.plazo_meses <= 0:
@@ -86,7 +105,7 @@ class Venta(models.Model):
             self.monto_financiar = Decimal('0.00')
             self.plazo_meses = 0
             self.tasa_interes_anual = 0
-            self.total_pagar_contado = max(Decimal('0.00'), monto_calculado)
+            self.total_pagar_contado = max(Decimal('0.00'), (self.valor_lote + costo_instalacion) - self.descuento)
 
         super().clean()
 
@@ -140,9 +159,56 @@ class Venta(models.Model):
                     )
             
             # Sincronización de cuotas: debe ejecutarse tanto al crear como al editar.
+            from cuentas_cobrar.logic import sincronizar_cuotas
+            sincronizar_cuotas(self)
+            self.actualizar_totales()
+            
+            # Asegurarnos que el estado del lote coincida (útil para ediciones)
+            if not is_new and self.lote.estado_disponibilidad != 'escriturado':
+                estado_esperado_lote = 'pagado' if self.tipo_pago == 'CONTADO' else 'financiado'
+                if self.lote.estado_disponibilidad != estado_esperado_lote:
+                    self.lote.estado_disponibilidad = estado_esperado_lote
+                    self.lote.save()
+
+    def actualizar_totales(self):
+        from cuentas_cobrar.models import Cuota
+        from django.utils import timezone
+        
+        # Calcular total pagado (basado en cuotas pagadas o pagos activos)
+        cuotas = self.cuotas_cobrar.all()
+        pagadas = cuotas.filter(estado='Pagado')
+        
+        total_pagado = sum(c.monto_cuota for c in pagadas)
+        saldo_pendiente = self.monto_financiar - total_pagado
+        
+        cuotas_vencidas = cuotas.filter(
+            estado='Pendiente', 
+            fecha_programada__lt=timezone.now().date()
+        ).count()
+        
+        self.total_pagado_calculado = total_pagado
+        self.saldo_pendiente_calculado = max(Decimal('0.00'), saldo_pendiente)
+        self.cuotas_vencidas_calculado = cuotas_vencidas
+        
+        estado_nuevo = self.estado
+        if self.estado != 'CANCELADA':
             if self.tipo_pago == 'FINANCIADO':
-                from cuentas_cobrar.logic import sincronizar_cuotas
-                sincronizar_cuotas(self)
+                if cuotas.count() > 0 and pagadas.count() == cuotas.count():
+                    estado_nuevo = 'COMPLETADA'
+                else:
+                    estado_nuevo = 'GENERADA'
+            elif self.tipo_pago == 'CONTADO':
+                estado_nuevo = 'COMPLETADA'
+                
+        self.estado = estado_nuevo
+
+        # Evitamos el loop infinito usando update_fields si es posible, o save sin logic pesado
+        Venta.objects.filter(pk=self.pk).update(
+            total_pagado_calculado=self.total_pagado_calculado,
+            saldo_pendiente_calculado=self.saldo_pendiente_calculado,
+            cuotas_vencidas_calculado=self.cuotas_vencidas_calculado,
+            estado=self.estado
+        )
 
     def crear_plan_financiamiento(self):
         """Genera el financiamiento y las cuotas iniciales"""
@@ -270,7 +336,20 @@ class Cotizacion(models.Model):
         verbose_name='Vendedor'
     )
 
+    ESTADO_COTIZACION_CHOICES = [
+        ('PENDIENTE', 'Pendiente'),
+        ('ACEPTADA', 'Aceptada'),
+        ('RECHAZADA', 'Rechazada'),
+        ('VENCIDA', 'Vencida'),
+    ]
+
     fecha_vencimiento = models.DateField(verbose_name='Fecha de Vencimiento')
+    estado = models.CharField(
+        max_length=20, 
+        choices=ESTADO_COTIZACION_CHOICES, 
+        default='PENDIENTE',
+        verbose_name='Estado'
+    )
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
 
@@ -284,11 +363,17 @@ class Cotizacion(models.Model):
         cliente_nombre = self.cliente.nombres if self.cliente else self.nombre_prospecto
         return f"Cotización Lote {self.lote.numero_lote} - {cliente_nombre}"
 
+    @property
+    def es_vencida(self):
+        from django.utils import timezone
+        return self.fecha_vencimiento < timezone.now().date()
+
     def clean(self):
         if not self.cliente and not self.nombre_prospecto:
             raise ValidationError("Debe especificar un cliente registrado o un nombre de prospecto.")
 
-        monto_calculado = self.valor_lote - self.enganche - self.descuento
+        costo_instalacion = self.lote.costo_instalacion if self.acepta_instalacion else Decimal('0.00')
+        monto_calculado = (self.valor_lote + costo_instalacion) - self.enganche - self.descuento
         
         if self.tipo_pago == 'FINANCIADO':
             if self.plazo_meses <= 0:
@@ -306,3 +391,5 @@ class Cotizacion(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
+
+

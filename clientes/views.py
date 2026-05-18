@@ -49,3 +49,66 @@ class ClienteViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    @action(detail=True, methods=['delete'])
+    def force_delete(self, request, pk=None):
+        """
+        Elimina físicamente a un cliente y todos sus registros asociados
+        (Ventas, Cotizaciones, Servicios, Pagos).
+        Libera los lotes asociados dejándolos en estado 'disponible'.
+        """
+        cliente = self.get_object()
+        from django.db import transaction
+        from ventas.models import Venta, Cotizacion
+        from servicios.models import BilleteraServicio, ConfiguracionServicioLote, PagoServicio
+        from financiamiento.models import Financiamiento
+        from lotes.models import HistorialLote
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            with transaction.atomic():
+                # 1. Obtener todas las ventas del cliente
+                ventas = Venta.objects.filter(cliente=cliente)
+                
+                for venta in ventas:
+                    lote = venta.lote
+                    
+                    # A. Eliminar Configuraciones de Servicios y Pagos de Servicios para el Lote
+                    # (Como el lote se libera, se limpia su historial de servicios contratados)
+                    ConfiguracionServicioLote.objects.filter(lote=lote).delete()
+                    PagoServicio.objects.filter(lote=lote).delete()
+
+                    # B. Eliminar Financiamiento si existe
+                    Financiamiento.objects.filter(lote=lote).delete()
+
+                    # C. Liberar el lote y registrar historial
+                    estado_anterior = lote.estado_disponibilidad
+                    lote.estado_disponibilidad = 'disponible'
+                    lote.save()
+
+                    HistorialLote.objects.create(
+                        lote=lote,
+                        estado_disponibilidad_anterior=estado_anterior,
+                        estado_disponibilidad_nuevo='disponible',
+                        notas=f"Lote liberado por eliminación forzada del cliente {cliente.nombres} {cliente.apellidos}"
+                    )
+                
+                # 2. Eliminar Billetera de Servicios del Cliente (si existe)
+                BilleteraServicio.objects.filter(cliente=cliente).delete()
+
+                # 3. Eliminar Ventas 
+                # ( CASCADE eliminará: ventas_cuota, ventas_pago, ventas_historialcambios )
+                ventas.delete()
+
+                # 4. Eliminar Cotizaciones
+                Cotizacion.objects.filter(cliente=cliente).delete()
+
+                # 5. Eliminar Cliente físicamente
+                cliente.delete()
+
+            return Response({"detail": "Cliente y registros eliminados. Lotes liberados exitosamente."}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            logger.error(f"Error en force_delete para cliente {pk}: {str(e)}")
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

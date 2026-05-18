@@ -15,6 +15,7 @@ class Lotificacion(models.Model):
     Modelo para representar una lotificación
     """
     nombre = models.CharField(max_length=200, unique=True, verbose_name='Nombre de la Lotificación')
+    logo = models.ImageField(upload_to='lotificaciones/logos/', blank=True, null=True, verbose_name='Logotipo')
     descripcion = models.TextField(blank=True, null=True, verbose_name='Descripción')
     ubicacion = models.CharField(max_length=200, blank=True, null=True, verbose_name='Ubicación')
     activo = models.BooleanField(default=True, verbose_name='Activo')
@@ -240,10 +241,10 @@ class Lote(models.Model):
 
     @property
     def saldo_financiar(self):
-        """Calcula el saldo a financiar (valor total menos costo de instalación)"""
-        if self.valor_total is None or self.costo_instalacion is None:
+        """Calcula el saldo a financiar (ahora es el valor total base)"""
+        if self.valor_total is None:
             return Decimal('0.00')
-        return self.valor_total - self.costo_instalacion
+        return self.valor_total
 
     @property
     def valor_total_formateado(self):
@@ -291,10 +292,10 @@ class Lote(models.Model):
                 # Si es un objeto User sin is_authenticated, asignarlo directamente
                 self.actualizado_por = user
         
-        # Solo validar si todos los valores están presentes
-        if self.valor_total is not None and self.costo_instalacion is not None:
-            if self.saldo_financiar <= 0:
-                raise ValueError("El saldo a financiar debe ser mayor a 0")
+        # Solo validar que el valor total sea positivo
+        if self.valor_total is not None:
+            if self.valor_total <= 0:
+                raise ValueError("El valor total del lote debe ser mayor a 0")
         
         # Incrementar versión en cada actualización
         if self.pk:

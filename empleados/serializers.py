@@ -49,6 +49,10 @@ class EmpleadoSerializer(serializers.ModelSerializer):
                 last_name=apellido
             )
             
+            estado = validated_data.get('estado', True)
+            user.is_active = estado
+            user.save()
+            
             # Asignar rol al usuario
             rol_name = validated_data.get('rol')
             if rol_name:
