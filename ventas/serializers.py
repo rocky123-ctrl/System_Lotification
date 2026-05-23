@@ -38,27 +38,25 @@ class VentaSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         acepta_instalacion = data.get('acepta_instalacion', self.instance.acepta_instalacion if self.instance else False)
-        
         lote = data.get('lote', self.instance.lote if self.instance else None)
-        if lote:
-            data['valor_lote'] = lote.valor_total
-        
-        valor_lote = data.get('valor_lote', self.instance.valor_lote if self.instance else Decimal('0.00'))
-        costo_instalacion = lote.costo_instalacion if (lote and acepta_instalacion) else Decimal('0.00')
         enganche = data.get('enganche', self.instance.enganche if self.instance else Decimal('0.00'))
         descuento = data.get('descuento', self.instance.descuento if self.instance else Decimal('0.00'))
         tipo_pago = data.get('tipo_pago', self.instance.tipo_pago if self.instance else None)
         plazo = data.get('plazo_meses', self.instance.plazo_meses if self.instance else 0)
         tasa = data.get('tasa_interes_anual', self.instance.tasa_interes_anual if self.instance else 0)
         
-        monto_maximo = valor_lote + costo_instalacion
+        if lote:
+            costo_instalacion = lote.costo_instalacion if acepta_instalacion else Decimal('0.00')
+            valor_final_promesa = (lote.valor_total + costo_instalacion) - descuento
+        else:
+            valor_final_promesa = self.instance.valor_lote if self.instance else Decimal('0.00')
         
-        if (enganche + descuento) > monto_maximo:
-            raise serializers.ValidationError("El pago inicial y el descuento superan el valor del lote (incluyendo instalación si aplica).")
+        if enganche > valor_final_promesa:
+            raise serializers.ValidationError("El pago inicial supera el valor final promesa del lote.")
         
         if tipo_pago == 'CONTADO':
-            if (enganche + descuento) != monto_maximo:
-                raise serializers.ValidationError("En una venta al contado, el monto pagado más el descuento debe ser exactamente igual al valor total del lote.")
+            if enganche != valor_final_promesa:
+                raise serializers.ValidationError("En una venta al contado, el monto neto pagado debe ser exactamente igual al valor final promesa.")
             data['plazo_meses'] = 0
             data['tasa_interes_anual'] = 0
         elif tipo_pago == 'FINANCIADO':
@@ -140,27 +138,25 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         acepta_instalacion = data.get('acepta_instalacion', self.instance.acepta_instalacion if self.instance else False)
-        
         lote = data.get('lote', self.instance.lote if self.instance else None)
-        if lote:
-            data['valor_lote'] = lote.valor_total
-        
-        valor_lote = data.get('valor_lote', self.instance.valor_lote if self.instance else Decimal('0.00'))
-        costo_instalacion = lote.costo_instalacion if (lote and acepta_instalacion) else Decimal('0.00')
         enganche = data.get('enganche', self.instance.enganche if self.instance else Decimal('0.00'))
         descuento = data.get('descuento', self.instance.descuento if self.instance else Decimal('0.00'))
         tipo_pago = data.get('tipo_pago', self.instance.tipo_pago if self.instance else None)
         plazo = data.get('plazo_meses', self.instance.plazo_meses if self.instance else 0)
         tasa = data.get('tasa_interes_anual', self.instance.tasa_interes_anual if self.instance else 0)
         
-        monto_maximo = valor_lote + costo_instalacion
+        if lote:
+            costo_instalacion = lote.costo_instalacion if acepta_instalacion else Decimal('0.00')
+            valor_final_promesa = (lote.valor_total + costo_instalacion) - descuento
+        else:
+            valor_final_promesa = self.instance.valor_lote if self.instance else Decimal('0.00')
         
-        if (enganche + descuento) > monto_maximo:
-            raise serializers.ValidationError("El pago inicial y el descuento superan el valor del lote (incluyendo instalación si aplica).")
+        if enganche > valor_final_promesa:
+            raise serializers.ValidationError("El enganche propuesto supera el valor final promesa del lote.")
         
         if tipo_pago == 'CONTADO':
-            if (enganche + descuento) != monto_maximo:
-                raise serializers.ValidationError("En una venta al contado, el monto pagado más el descuento debe ser exactamente igual al valor total del lote.")
+            if enganche != valor_final_promesa:
+                raise serializers.ValidationError("En una venta al contado, el monto neto pagado debe ser exactamente igual al valor final promesa.")
             data['plazo_meses'] = 0
             data['tasa_interes_anual'] = 0
         elif tipo_pago == 'FINANCIADO':

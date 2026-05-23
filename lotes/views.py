@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class LotePagination(PageNumberPagination):
     """Paginación para lotes"""
-    page_size = 8
+    page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
     

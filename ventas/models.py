@@ -91,9 +91,10 @@ class Venta(models.Model):
                 raise ValidationError(f"El lote {self.lote.numero_lote} no está disponible para venta. Estado actual: {self.lote.get_estado_disponibilidad_display()}")
 
         # Re-calcular monto a financiar (Verdad lógica en el servidor)
-        # Se incluye el costo de instalación si se aceptó
+        # Se incluye el costo de instalación si se aceptó y se resta el descuento
         costo_instalacion = self.lote.costo_instalacion if self.acepta_instalacion else Decimal('0.00')
-        monto_calculado = (self.valor_lote + costo_instalacion) - self.enganche - self.descuento
+        self.valor_lote = (self.lote.valor_total + costo_instalacion) - self.descuento
+        monto_calculado = self.valor_lote - self.enganche
         
         if self.tipo_pago == 'FINANCIADO':
             if self.plazo_meses <= 0:
@@ -105,7 +106,7 @@ class Venta(models.Model):
             self.monto_financiar = Decimal('0.00')
             self.plazo_meses = 0
             self.tasa_interes_anual = 0
-            self.total_pagar_contado = max(Decimal('0.00'), (self.valor_lote + costo_instalacion) - self.descuento)
+            self.total_pagar_contado = max(Decimal('0.00'), self.valor_lote)
 
         super().clean()
 
@@ -125,8 +126,8 @@ class Venta(models.Model):
                 # Primero intentamos obtener el empleado asociado al usuario
                 empleado = Empleado.objects.filter(usuario=self.vendedor).first()
                 if empleado and empleado.porcentaje_comision:
-                    # Comision = (Valor del Lote - Descuento) * (Porcentaje / 100)
-                    base_comision = self.valor_lote - self.descuento
+                    # Comision = Valor Promesa * (Porcentaje / 100)
+                    base_comision = self.valor_lote
                     self.comision_monto = base_comision * (empleado.porcentaje_comision / Decimal('100.00'))
 
         with transaction.atomic():
@@ -157,6 +158,10 @@ class Venta(models.Model):
                         monto_pagado=self.comision_monto,
                         estado_pago='PENDIENTE'
                     )
+
+                # Generar el plan de financiamiento y cuotas en el módulo de financiamiento si aplica
+                if self.tipo_pago == 'FINANCIADO':
+                    self.crear_plan_financiamiento()
             
             # Sincronización de cuotas: debe ejecutarse tanto al crear como al editar.
             from cuentas_cobrar.logic import sincronizar_cuotas
@@ -373,7 +378,8 @@ class Cotizacion(models.Model):
             raise ValidationError("Debe especificar un cliente registrado o un nombre de prospecto.")
 
         costo_instalacion = self.lote.costo_instalacion if self.acepta_instalacion else Decimal('0.00')
-        monto_calculado = (self.valor_lote + costo_instalacion) - self.enganche - self.descuento
+        self.valor_lote = (self.lote.valor_total + costo_instalacion) - self.descuento
+        monto_calculado = self.valor_lote - self.enganche
         
         if self.tipo_pago == 'FINANCIADO':
             if self.plazo_meses <= 0:
@@ -384,7 +390,7 @@ class Cotizacion(models.Model):
             self.monto_financiar = Decimal('0.00')
             self.plazo_meses = 0
             self.tasa_interes_anual = 0
-            self.total_pagar_contado = max(Decimal('0.00'), monto_calculado)
+            self.total_pagar_contado = max(Decimal('0.00'), self.valor_lote)
 
         super().clean()
 

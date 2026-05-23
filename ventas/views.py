@@ -128,6 +128,9 @@ class VentaViewSet(viewsets.ModelViewSet):
             ConfiguracionServicioLote.objects.filter(lote=lote).delete()
             PagoServicio.objects.filter(lote=lote).delete()
 
+            # 6. Eliminar cotización asociada si existe
+            Cotizacion.objects.filter(lote=lote, cliente=instance.cliente).delete()
+
     @action(detail=True, methods=['post'])
     def restaurar(self, request, pk=None):
         """
@@ -304,6 +307,138 @@ class VentaViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=['get'])
+    def reporte_dashboard(self, request):
+        from lotes.models import Lote, Manzana
+        from cuentas_cobrar.models import Cuota
+        from financiamiento.models import Financiamiento
+        from django.db.models import Sum, Count, Q
+
+        fecha_inicio = request.query_params.get('fecha_inicio')
+        fecha_fin = request.query_params.get('fecha_fin')
+        lotificacion_id = request.query_params.get('lotificacion_id')
+
+        # 1. Filtros base
+        ventas_qs = Venta.objects.exclude(estado='CANCELADA')
+        lotes_qs = Lote.objects.all()
+        cuotas_qs = Cuota.objects.filter(estado='pagado')
+
+        if fecha_inicio and fecha_fin:
+            ventas_qs = ventas_qs.filter(fecha_creacion__date__range=[fecha_inicio, fecha_fin])
+            cuotas_qs = cuotas_qs.filter(fecha_pago__range=[fecha_inicio, fecha_fin])
+            # Para lotes, podemos basarnos en si pertenecen a manzanas filtradas
+        
+        if lotificacion_id and lotificacion_id != 'all':
+            ventas_qs = ventas_qs.filter(lote__manzana__lotificacion_id=lotificacion_id)
+            lotes_qs = lotes_qs.filter(manzana__lotificacion_id=lotificacion_id)
+            cuotas_qs = cuotas_qs.filter(financiamiento__lote__manzana__lotificacion_id=lotificacion_id)
+
+        # 2. Métricas de Lotes (Estado)
+        estados_lotes = lotes_qs.values('estado_disponibilidad').annotate(total=Count('id'))
+        dict_estados = {item['estado_disponibilidad']: item['total'] for item in estados_lotes}
+        
+        lotes_disponibles = dict_estados.get('disponible', 0)
+        lotes_financiados = dict_estados.get('financiado', 0)
+        lotes_pagados = dict_estados.get('pagado', 0) + dict_estados.get('escriturado', 0)
+        lotes_reservados = dict_estados.get('reservado', 0)
+        
+        # 3. Métricas Financieras
+        # Valor Total de Ventas y Enganches
+        ventas_totales = ventas_qs.aggregate(
+            total_ventas=Sum('valor_lote'),
+            total_enganches=Sum('enganche')
+        )
+        valor_total_ventas = ventas_totales['total_ventas'] or Decimal('0.00')
+        valor_enganches = ventas_totales['total_enganches'] or Decimal('0.00')
+
+        # Capital e Intereses Cobrados (de las cuotas pagadas)
+        cobros_totales = cuotas_qs.aggregate(
+            capital=Sum('monto_capital'),
+            interes=Sum('monto_interes')
+        )
+        valor_capital_cobrado = cobros_totales['capital'] or Decimal('0.00')
+        valor_intereses_cobrados = cobros_totales['interes'] or Decimal('0.00')
+
+        # Pendiente de cobro: 
+        # (Suma de montos a financiar en las ventas) - (Capital cobrado total histórico de esos financiamientos)
+        # O de forma simplificada: Suma del saldo insoluto de los financiamientos activos.
+        finan_qs = Financiamiento.objects.filter(estado='activo')
+        if lotificacion_id and lotificacion_id != 'all':
+            finan_qs = finan_qs.filter(lote__manzana__lotificacion_id=lotificacion_id)
+        
+        # Para ser precisos con la fecha_fin, idealmente calcularíamos el saldo a esa fecha.
+        # Por simplicidad y rendimiento, tomamos el saldo actual de la base de datos si no es un histórico complejo.
+        saldo_pendiente = finan_qs.aggregate(total=Sum('saldo'))['total'] or Decimal('0.00')
+
+        # Ventas al Contado totales pagadas (ya incluidas en valor_total_ventas)
+        # Para el total de "Recibido", sumamos enganches + capital cuotas + total de contado
+        ventas_contado = ventas_qs.filter(tipo_pago='CONTADO').aggregate(total=Sum('valor_lote'))['total'] or Decimal('0.00')
+        
+        # Para "Reservas", en este sistema no hay tabla explícita de reservas financieras, asumiremos 0.
+        valor_reservas = Decimal('0.00')
+
+        # 4. Tendencia Ventas Mensuales (para el gráfico)
+        from django.db.models.functions import TruncMonth
+        ventas_mensuales = ventas_qs.annotate(mes=TruncMonth('fecha_creacion')).values('mes').annotate(
+            ventas=Count('id'),
+            monto=Sum('valor_lote')
+        ).order_by('mes')
+
+        # Mapeo de números de mes a nombres
+        meses_nombres = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 
+                         7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
+        
+        data_ventas_mensuales = []
+        for vm in ventas_mensuales:
+            if vm['mes']:
+                data_ventas_mensuales.append({
+                    'mes': f"{meses_nombres[vm['mes'].month]} {vm['mes'].year}",
+                    'ventas': vm['ventas'],
+                    'monto': float(vm['monto'] or 0)
+                })
+
+        # 5. Resumen por Manzana
+        manzanas_qs = Manzana.objects.all()
+        if lotificacion_id and lotificacion_id != 'all':
+            manzanas_qs = manzanas_qs.filter(lotificacion_id=lotificacion_id)
+            
+        resumen_por_manzana = []
+        for manzana in manzanas_qs:
+            l_manzana = lote_qs_manzana = Lote.objects.filter(manzana=manzana)
+            v_manzana = ventas_qs.filter(lote__manzana=manzana)
+            
+            est = l_manzana.values('estado_disponibilidad').annotate(c=Count('id'))
+            d_est = {x['estado_disponibilidad']: x['c'] for x in est}
+            
+            v_tot = v_manzana.aggregate(t=Sum('valor_lote'))['t'] or Decimal('0.00')
+            
+            resumen_por_manzana.append({
+                'manzana': manzana.nombre,
+                'disponibles': d_est.get('disponible', 0),
+                'financiados': d_est.get('financiado', 0),
+                'reservados': d_est.get('reservado', 0),
+                'pagados': d_est.get('pagado', 0) + d_est.get('escriturado', 0),
+                'valorTotal': float(v_tot)
+            })
+
+        response_data = {
+            'lotesDisponibles': lotes_disponibles,
+            'lotesFinanciados': lotes_financiados,
+            'lotesReservados': lotes_reservados,
+            'lotesPagados': lotes_pagados,
+            'lotesCancelados': 0, # En lotes el estado vuelve a disponible
+            'valorTotalVentas': float(valor_total_ventas),
+            'valorEnganches': float(valor_enganches),
+            'valorCapitalCobrado': float(valor_capital_cobrado + ventas_contado), # Se incluye venta al contado como capital
+            'valorInteresesCobrados': float(valor_intereses_cobrados),
+            'valorReservas': float(valor_reservas),
+            'valorPendienteCobro': float(saldo_pendiente),
+            'dataVentasMensuales': data_ventas_mensuales,
+            'resumenPorManzana': resumen_por_manzana
+        }
+
+        return Response(response_data)
+
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
@@ -479,7 +614,7 @@ class LiquidacionComisionViewSet(viewsets.ModelViewSet):
         return response
 
 class CotizacionesPagination(PageNumberPagination):
-    page_size = 8
+    page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
 
@@ -530,6 +665,11 @@ class CotizacionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(vendedor=self.request.user)
 
+    def perform_destroy(self, instance):
+        if instance.estado == 'ACEPTADA':
+            raise drf_serializers.ValidationError({'error': 'No se puede eliminar una cotización que ya fue aceptada y convertida en venta.'})
+        instance.delete()
+
     @action(detail=True, methods=['post'])
     def convertir_a_venta(self, request, pk=None):
         cotizacion = self.get_object()
@@ -550,7 +690,10 @@ class CotizacionViewSet(viewsets.ModelViewSet):
         from django.db import transaction
         with transaction.atomic():
             if cotizacion.lote.estado_disponibilidad != 'disponible':
-                return Response({'error': f'El lote {cotizacion.lote.numero_lote} ya no está disponible.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    'error': f'No se pudo concretar la cotización porque ya hay una venta registrada del lote cotizado (Lote {cotizacion.lote.numero_lote}).',
+                    'code': 'LOTE_NO_DISPONIBLE'
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             try:
                 nueva_venta = Venta(
