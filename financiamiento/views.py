@@ -7,11 +7,11 @@ from django.db.models import Sum, Count, Q
 from django.utils import timezone
 from datetime import date, timedelta
 from decimal import Decimal
-from .models import Financiamiento, Cuota, Pago, ConfiguracionPago, PagoCapital
+from .models import Financiamiento, Cuota, Pago, PagoCapital
 from .serializers import (
     FinanciamientoSerializer, FinanciamientoCreateSerializer, FinanciamientoListSerializer,
     FinanciamientoDetailSerializer, CuotaSerializer, CuotaDetailSerializer,
-    PagoSerializer, PagoDetailSerializer, ConfiguracionPagoSerializer,
+    PagoSerializer, PagoDetailSerializer,
     FinanciamientoEstadisticasSerializer, PagoCapitalSerializer, PagoCapitalCreateSerializer
 )
 from rest_framework import serializers
@@ -753,22 +753,6 @@ class PagoViewSet(viewsets.ModelViewSet):
                 'errores': len(errores)
             }, status=status.HTTP_400_BAD_REQUEST)
 
-
-class ConfiguracionPagoViewSet(viewsets.ModelViewSet):
-    """ViewSet para gestión de configuraciones de pago"""
-    queryset = ConfiguracionPago.objects.all()
-    serializer_class = ConfiguracionPagoSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return ConfiguracionPago.objects.filter(activo=True).order_by('tipo_pago', 'dia_pago')
-
-    @action(detail=False, methods=['get'])
-    def activas(self, request):
-        """Obtener configuraciones activas"""
-        configuraciones = self.get_queryset()
-        serializer = self.get_serializer(configuraciones, many=True)
-        return Response(serializer.data)
 
 
 @api_view(['POST'])

@@ -1,17 +1,9 @@
 from rest_framework import serializers
-from .models import Financiamiento, Cuota, Pago, ConfiguracionPago, PagoCapital
+from .models import Financiamiento, Cuota, Pago, PagoCapital
 from lotes.serializers import LoteSerializer, ManzanaSerializer
 from lotes.models import Lote
 from decimal import Decimal
 from django.db import models
-
-
-class ConfiguracionPagoSerializer(serializers.ModelSerializer):
-    """Serializer para configuración de pagos"""
-    
-    class Meta:
-        model = ConfiguracionPago
-        fields = '__all__'
 
 
 class CuotaSerializer(serializers.ModelSerializer):

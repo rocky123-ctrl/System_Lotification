@@ -23,13 +23,13 @@ class Venta(models.Model):
 
     cliente = models.ForeignKey(
         'clientes.Cliente', 
-        on_delete=models.PROTECT, 
+        on_delete=models.CASCADE, 
         related_name='ventas',
         verbose_name='Cliente'
     )
     lote = models.ForeignKey(
         'lotes.Lote', 
-        on_delete=models.PROTECT, 
+        on_delete=models.CASCADE, 
         related_name='ventas',
         verbose_name='Lote'
     )
@@ -54,7 +54,7 @@ class Venta(models.Model):
 
     vendedor = models.ForeignKey(
         'auth.User',
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name='ventas_realizadas',
         null=True,
         blank=True,
@@ -281,7 +281,7 @@ class LiquidacionComision(models.Model):
     ]
 
     venta = models.OneToOneField(Venta, on_delete=models.CASCADE, related_name='liquidacion_comision')
-    vendedor = models.ForeignKey('auth.User', on_delete=models.PROTECT, related_name='liquidaciones')
+    vendedor = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='liquidaciones')
     monto_pagado = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='Monto de Comisión')
     fecha_pago = models.DateField(null=True, blank=True, verbose_name='Fecha de Pago')
     es_pago_inmediato = models.BooleanField(default=False, verbose_name='Es Pago Inmediato')
@@ -304,7 +304,7 @@ class Cotizacion(models.Model):
 
     cliente = models.ForeignKey(
         'clientes.Cliente', 
-        on_delete=models.SET_NULL, 
+        on_delete=models.CASCADE, 
         related_name='cotizaciones',
         null=True,
         blank=True,
@@ -315,7 +315,7 @@ class Cotizacion(models.Model):
     
     lote = models.ForeignKey(
         'lotes.Lote', 
-        on_delete=models.PROTECT, 
+        on_delete=models.CASCADE, 
         related_name='cotizaciones',
         verbose_name='Lote'
     )
@@ -334,7 +334,7 @@ class Cotizacion(models.Model):
 
     vendedor = models.ForeignKey(
         'auth.User',
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         related_name='cotizaciones_realizadas',
         null=True,
         blank=True,

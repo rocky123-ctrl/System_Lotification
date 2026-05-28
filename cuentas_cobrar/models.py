@@ -44,7 +44,7 @@ class Pago(models.Model):
     fecha_pago = models.DateTimeField(default=timezone.now, verbose_name="Fecha de Pago")
     metodo_pago = models.CharField(max_length=50, choices=METODO_PAGO_CHOICES, verbose_name="Método de Pago", default='Efectivo')
     referencia = models.CharField(max_length=100, blank=True, null=True, verbose_name="Referencia de Pago")
-    usuario = models.ForeignKey(User, on_delete=models.PROTECT, verbose_name="Usuario que cobró", null=True, blank=True)
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="Usuario que cobró", null=True, blank=True)
     activo = models.BooleanField(default=True, verbose_name="Activo")
 
     class Meta:
@@ -71,7 +71,7 @@ class BitacoraCambio(models.Model):
     venta = models.ForeignKey('ventas.Venta', on_delete=models.CASCADE, related_name='bitacora_cambios')
     fecha = models.DateTimeField(auto_now_add=True)
     descripcion = models.TextField(verbose_name="Descripción del Cambio", default='')
-    usuario = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Usuario")
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Usuario")
 
     class Meta:
         db_table = 'ventas_historialcambios'

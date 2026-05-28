@@ -8,7 +8,6 @@ router = DefaultRouter()
 router.register(r'financiamientos', views.FinanciamientoViewSet)
 router.register(r'cuotas', views.CuotaViewSet)
 router.register(r'pagos', views.PagoViewSet)
-router.register(r'configuracion-pago', views.ConfiguracionPagoViewSet)
 router.register(r'pagos-capital', views.PagoCapitalViewSet)
 
 urlpatterns = [

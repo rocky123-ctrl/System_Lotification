@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Financiamiento, Cuota, Pago, ConfiguracionPago, PagoCapital
+from .models import Financiamiento, Cuota, Pago, PagoCapital
 
 
 class CuotaInline(admin.TabularInline):
@@ -111,9 +111,3 @@ class PagoCapitalAdmin(admin.ModelAdmin):
             obj.creado_por = request.user
         super().save_model(request, obj, form, change)
 
-
-@admin.register(ConfiguracionPago)
-class ConfiguracionPagoAdmin(admin.ModelAdmin):
-    list_display = ['tipo_pago', 'dia_pago', 'activo']
-    list_filter = ['tipo_pago', 'activo']
-    search_fields = ['tipo_pago']

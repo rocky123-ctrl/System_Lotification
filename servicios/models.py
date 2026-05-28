@@ -124,7 +124,7 @@ class PagoServicio(models.Model):
     )
     servicio = models.ForeignKey(
         ServicioCatalogo, 
-        on_delete=models.PROTECT, 
+        on_delete=models.CASCADE, 
         related_name='pagos',
         verbose_name='Servicio'
     )

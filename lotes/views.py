@@ -307,11 +307,8 @@ class LotificacionViewSet(viewsets.ModelViewSet):
         lote_id = request.data.get('lote_id')
         identificador = (request.data.get('identificador') or '').strip()
 
-        # Extraer [manzana]-[numero_lote] omitiendo la abreviatura de la lotificación
-        if '-' in identificador:
-            plano_svg_id_val = identificador.split('-', 1)[1]
-        else:
-            plano_svg_id_val = identificador
+        # Usar el identificador tal cual viene del SVG (ej. MZ03-L01)
+        plano_svg_id_val = identificador
 
         if not lote_id:
             return Response(
@@ -355,8 +352,9 @@ class LotificacionViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Guardar el SVG ID extraido, preservar el 'identificador' original comercial sin tocarlo
+            # Guardar el SVG ID extraido y también el identificador
             lote.plano_svg_id = plano_svg_id_val
+            lote.identificador = plano_svg_id_val
             lote.save(user=request.user if hasattr(request, 'user') else None)
 
         serializer = LoteSerializer(lote)
@@ -396,11 +394,39 @@ class LotificacionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         lote.plano_svg_id = None
+        lote.identificador = None
         lote.save(user=request.user if hasattr(request, 'user') else None)
         if request.user and getattr(request.user, 'is_authenticated', True):
             Lote.objects.filter(pk=lote.pk).update(actualizado_por=request.user)
             lote.refresh_from_db()
         return Response(LoteSerializer(lote).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='desvincular-todos-lotes')
+    def desvincular_todos_lotes(self, request, pk=None):
+        """
+        Desvincular todos los lotes del plano: limpia la relación plano_svg_id de 
+        todos los lotes activos pertenecientes a esta lotificación.
+        
+        POST /api/lotes/lotificaciones/{id}/desvincular-todos-lotes/
+        """
+        lotificacion = self.get_object()
+        
+        from django.db.models import Q
+        lotes_afectados = Lote.objects.filter(
+            Q(plano_svg_id__isnull=False) | Q(identificador__isnull=False),
+            manzana__lotificacion_id=lotificacion.id,
+            activo=True
+        )
+        
+        cantidad = lotes_afectados.count()
+        
+        # Desvincularlos masivamente
+        lotes_afectados.update(plano_svg_id=None, identificador=None)
+        
+        return Response({
+            'success': True,
+            'message': f'Se desvincularon {cantidad} lotes exitosamente.'
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='subir-plano-svg')
     def subir_plano_svg(self, request, pk=None):
@@ -549,7 +575,13 @@ class LoteViewSet(viewsets.ModelViewSet):
         return LoteSerializer
 
     def get_queryset(self):
-        queryset = Lote.objects.filter(activo=True).select_related(
+        incluir_inactivos = self.request.query_params.get('incluir_inactivos', 'false').lower() == 'true'
+        if incluir_inactivos or self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
+            queryset = Lote.objects.all()
+        else:
+            queryset = Lote.objects.filter(activo=True)
+            
+        queryset = queryset.select_related(
             'manzana', 
             'manzana__lotificacion',
             'actualizado_por'

@@ -310,24 +310,21 @@ class VentaViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def reporte_dashboard(self, request):
         from lotes.models import Lote, Manzana
-        from cuentas_cobrar.models import Cuota
-        from financiamiento.models import Financiamiento
+        from financiamiento.models import Financiamiento, Cuota
         from django.db.models import Sum, Count, Q
+        from django.db.models.functions import TruncMonth
+        import calendar
+        from datetime import date
 
         fecha_inicio = request.query_params.get('fecha_inicio')
         fecha_fin = request.query_params.get('fecha_fin')
         lotificacion_id = request.query_params.get('lotificacion_id')
 
-        # 1. Filtros base
+        # 1. Filtros base (Históricos / Generales)
         ventas_qs = Venta.objects.exclude(estado='CANCELADA')
         lotes_qs = Lote.objects.all()
-        cuotas_qs = Cuota.objects.filter(estado='pagado')
+        cuotas_qs = Cuota.objects.filter(estado='pagada')
 
-        if fecha_inicio and fecha_fin:
-            ventas_qs = ventas_qs.filter(fecha_creacion__date__range=[fecha_inicio, fecha_fin])
-            cuotas_qs = cuotas_qs.filter(fecha_pago__range=[fecha_inicio, fecha_fin])
-            # Para lotes, podemos basarnos en si pertenecen a manzanas filtradas
-        
         if lotificacion_id and lotificacion_id != 'all':
             ventas_qs = ventas_qs.filter(lote__manzana__lotificacion_id=lotificacion_id)
             lotes_qs = lotes_qs.filter(manzana__lotificacion_id=lotificacion_id)
@@ -342,7 +339,7 @@ class VentaViewSet(viewsets.ModelViewSet):
         lotes_pagados = dict_estados.get('pagado', 0) + dict_estados.get('escriturado', 0)
         lotes_reservados = dict_estados.get('reservado', 0)
         
-        # 3. Métricas Financieras
+        # 3. Métricas Financieras Históricas
         # Valor Total de Ventas y Enganches
         ventas_totales = ventas_qs.aggregate(
             total_ventas=Sum('valor_lote'),
@@ -351,7 +348,10 @@ class VentaViewSet(viewsets.ModelViewSet):
         valor_total_ventas = ventas_totales['total_ventas'] or Decimal('0.00')
         valor_enganches = ventas_totales['total_enganches'] or Decimal('0.00')
 
-        # Capital e Intereses Cobrados (de las cuotas pagadas)
+        # Nuevo KPI: Valor Total del Proyecto (Suma de los valores de todos los lotes)
+        valor_total_proyecto_lotes = lotes_qs.aggregate(total=Sum('valor_total'))['total'] or Decimal('0.00')
+
+        # Capital e Intereses Cobrados
         cobros_totales = cuotas_qs.aggregate(
             capital=Sum('monto_capital'),
             interes=Sum('monto_interes')
@@ -359,32 +359,39 @@ class VentaViewSet(viewsets.ModelViewSet):
         valor_capital_cobrado = cobros_totales['capital'] or Decimal('0.00')
         valor_intereses_cobrados = cobros_totales['interes'] or Decimal('0.00')
 
-        # Pendiente de cobro: 
-        # (Suma de montos a financiar en las ventas) - (Capital cobrado total histórico de esos financiamientos)
-        # O de forma simplificada: Suma del saldo insoluto de los financiamientos activos.
         finan_qs = Financiamiento.objects.filter(estado='activo')
         if lotificacion_id and lotificacion_id != 'all':
             finan_qs = finan_qs.filter(lote__manzana__lotificacion_id=lotificacion_id)
         
-        # Para ser precisos con la fecha_fin, idealmente calcularíamos el saldo a esa fecha.
-        # Por simplicidad y rendimiento, tomamos el saldo actual de la base de datos si no es un histórico complejo.
         saldo_pendiente = finan_qs.aggregate(total=Sum('saldo'))['total'] or Decimal('0.00')
 
-        # Ventas al Contado totales pagadas (ya incluidas en valor_total_ventas)
-        # Para el total de "Recibido", sumamos enganches + capital cuotas + total de contado
         ventas_contado = ventas_qs.filter(tipo_pago='CONTADO').aggregate(total=Sum('valor_lote'))['total'] or Decimal('0.00')
-        
-        # Para "Reservas", en este sistema no hay tabla explícita de reservas financieras, asumiremos 0.
         valor_reservas = Decimal('0.00')
 
-        # 4. Tendencia Ventas Mensuales (para el gráfico)
-        from django.db.models.functions import TruncMonth
-        ventas_mensuales = ventas_qs.annotate(mes=TruncMonth('fecha_creacion')).values('mes').annotate(
+        # 4. Tendencia Ventas Mensuales (para el gráfico - Afectado por fechas)
+        ventas_mensuales_qs = ventas_qs
+        if fecha_inicio:
+            try:
+                y, m = map(int, fecha_inicio.split('-'))
+                dt_inicio = date(y, m, 1)
+                ventas_mensuales_qs = ventas_mensuales_qs.filter(fecha_creacion__date__gte=dt_inicio)
+            except ValueError:
+                pass
+        
+        if fecha_fin:
+            try:
+                y, m = map(int, fecha_fin.split('-'))
+                _, last_day = calendar.monthrange(y, m)
+                dt_fin = date(y, m, last_day)
+                ventas_mensuales_qs = ventas_mensuales_qs.filter(fecha_creacion__date__lte=dt_fin)
+            except ValueError:
+                pass
+
+        ventas_mensuales = ventas_mensuales_qs.annotate(mes=TruncMonth('fecha_creacion')).values('mes').annotate(
             ventas=Count('id'),
             monto=Sum('valor_lote')
         ).order_by('mes')
 
-        # Mapeo de números de mes a nombres
         meses_nombres = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 
                          7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
         
@@ -428,6 +435,7 @@ class VentaViewSet(viewsets.ModelViewSet):
             'lotesPagados': lotes_pagados,
             'lotesCancelados': 0, # En lotes el estado vuelve a disponible
             'valorTotalVentas': float(valor_total_ventas),
+            'valorTotalProyectoLotes': float(valor_total_proyecto_lotes),
             'valorEnganches': float(valor_enganches),
             'valorCapitalCobrado': float(valor_capital_cobrado + ventas_contado), # Se incluye venta al contado como capital
             'valorInteresesCobrados': float(valor_intereses_cobrados),
@@ -438,6 +446,97 @@ class VentaViewSet(viewsets.ModelViewSet):
         }
 
         return Response(response_data)
+
+    @action(detail=False, methods=['get'])
+    def reporte_financiamiento_clientes(self, request):
+        from cuentas_cobrar.models import Cuota
+        from django.db.models import Sum, Q
+
+        lotificacion_id = request.query_params.get('lotificacion_id')
+        
+        ventas_qs = Venta.objects.filter(tipo_pago='FINANCIADO').exclude(estado='CANCELADA')
+        if lotificacion_id and lotificacion_id != 'all':
+            ventas_qs = ventas_qs.filter(lote__manzana__lotificacion_id=lotificacion_id)
+            
+        ventas_qs = ventas_qs.select_related('cliente', 'lote').order_by('-fecha_creacion')
+        
+        cuotas_qs = Cuota.objects.filter(venta__in=ventas_qs)
+        totales = cuotas_qs.aggregate(
+            total_monto=Sum('monto_cuota'),
+            pagados=Sum('monto_cuota', filter=Q(estado='Pagado')),
+            pendientes=Sum('monto_cuota', filter=Q(estado__in=['Pendiente', 'Vencido']))
+        )
+        total_monto = totales['total_monto'] or Decimal('0.00')
+        pagados = totales['pagados'] or Decimal('0.00')
+        pendientes = totales['pendientes'] or Decimal('0.00')
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(ventas_qs, request)
+        if page is not None:
+            data = []
+            for venta in page:
+                cuotas = venta.cuotas_cobrar.all()
+                total_cuotas = cuotas.count()
+                pagadas = cuotas.filter(estado='Pagado').count()
+                
+                data.append({
+                    'venta_id': venta.id,
+                    'cliente_nombre': f"{venta.cliente.nombres} {venta.cliente.apellidos}".strip(),
+                    'lote': venta.lote.numero_lote,
+                    'progreso_cuotas': f"{pagadas}/{total_cuotas}"
+                })
+            
+            response = paginator.get_paginated_response(data)
+            response.data['totales'] = {
+                'total_monto': float(total_monto),
+                'pagados': float(pagados),
+                'pendientes': float(pendientes)
+            }
+            return response
+
+        return Response([])
+
+    @action(detail=False, methods=['get'])
+    def reporte_servicios_clientes(self, request):
+        from servicios.models import ConfiguracionServicioLote, PagoServicio
+        from clientes.models import Cliente
+        
+        lotificacion_id = request.query_params.get('lotificacion_id')
+        
+        configuraciones = ConfiguracionServicioLote.objects.filter(esta_activo=True)
+        if lotificacion_id and lotificacion_id != 'all':
+            configuraciones = configuraciones.filter(lote__manzana__lotificacion_id=lotificacion_id)
+            
+        lotes_ids = configuraciones.values_list('lote_id', flat=True)
+        
+        ventas = Venta.objects.filter(lote_id__in=lotes_ids).exclude(estado='CANCELADA')
+        clientes_ids = ventas.values_list('cliente_id', flat=True).distinct()
+        
+        clientes_qs = Cliente.objects.filter(id__in=clientes_ids).order_by('nombres')
+        
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(clientes_qs, request)
+        if page is not None:
+            data = []
+            for cliente in page:
+                lotes_cliente = ventas.filter(cliente=cliente).values_list('lote_id', flat=True)
+                
+                pagos_atrasados = PagoServicio.objects.filter(
+                    lote_id__in=lotes_cliente, 
+                    estado__in=['Pendiente', 'Vencido']
+                ).exists()
+                
+                estado_al_dia = not pagos_atrasados
+                
+                data.append({
+                    'cliente_id': cliente.id,
+                    'cliente_nombre': f"{cliente.nombres} {cliente.apellidos}".strip(),
+                    'estado_al_dia': estado_al_dia
+                })
+                
+            return paginator.get_paginated_response(data)
+            
+        return Response([])
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10

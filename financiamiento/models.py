@@ -370,31 +370,6 @@ class Pago(models.Model):
                 self.financiamiento.save()
 
 
-class ConfiguracionPago(models.Model):
-    """Modelo para configurar las fechas de pago"""
-    TIPO_PAGO_CHOICES = [
-        ('fin_mes', 'Fin de Mes'),
-        ('quincena', 'Quincena'),
-        ('especifico', 'Día Específico'),
-    ]
-    
-    tipo_pago = models.CharField(max_length=20, choices=TIPO_PAGO_CHOICES, verbose_name="Tipo de Pago")
-    dia_pago = models.PositiveIntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(31)],
-        verbose_name="Día de Pago",
-        help_text="Día del mes para el pago (1-31)"
-    )
-    descripcion = models.CharField(max_length=200, verbose_name="Descripción")
-    activo = models.BooleanField(default=True, verbose_name="Activo")
-    
-    class Meta:
-        verbose_name = "Configuración de Pago"
-        verbose_name_plural = "Configuraciones de Pago"
-    
-    def __str__(self):
-        return f"{self.get_tipo_pago_display()} - Día {self.dia_pago}"
-
-
 class PagoCapital(models.Model):
     """Modelo para registrar pagos adelantados a capital"""
     financiamiento = models.ForeignKey(Financiamiento, on_delete=models.CASCADE, related_name='pagos_capital')
