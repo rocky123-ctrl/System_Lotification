@@ -18,7 +18,7 @@ from rest_framework.pagination import PageNumberPagination
 from dateutil.relativedelta import relativedelta
 
 class VentasPagination(PageNumberPagination):
-    page_size = 8
+    page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
 
@@ -36,10 +36,10 @@ class VentaViewSet(viewsets.ModelViewSet):
         user = self.request.user
         all_sales = self.request.query_params.get('all') == 'true'
         
-        # Un Superadmin puede ver todas las ventas si usa el parámetro 'all'
+        # Un Superadmin o Administrador puede ver todas las ventas si usa el parámetro 'all'
         is_super = user.is_superuser or (
             hasattr(user, 'user_roles') and 
-            user.user_roles.filter(role__name='Superadmin', is_active=True).exists()
+            user.user_roles.filter(role__name__in=['Superadmin', 'Administrador'], is_active=True).exists()
         )
 
         if is_super and all_sales:
@@ -83,115 +83,47 @@ class VentaViewSet(viewsets.ModelViewSet):
         # Asignar automáticamente el vendedor como el usuario activo
         serializer.save(vendedor=self.request.user, estado=estado)
 
-
-
     def perform_destroy(self, instance):
         """
-        En lugar de eliminar físicamente, cambiamos el estado a 'CANCELADA' (Soft-Cancel)
-        y liberamos el lote.
-        También borramos las cuotas y servicios contratados del cliente en el lote.
+        Elimina físicamente el registro de la venta (Hard Delete) en cascada.
+        Libera el lote, borra cuotas, servicios y la propia venta de forma permanente.
         """
         from django.db import transaction
         from lotes.models import HistorialLote
         from financiamiento.models import Financiamiento
         from cuentas_cobrar.models import Cuota
         from servicios.models import ConfiguracionServicioLote, PagoServicio
+        from ventas.models import Cotizacion
         
-        if instance.estado == 'CANCELADA':
-            return 
-
         with transaction.atomic():
             lote = instance.lote
             estado_anterior = lote.estado_disponibilidad
             
-            # 1. Cambiar estado de la venta
-            instance.estado = 'CANCELADA'
-            instance.save()
-
-            # 2. Liberar el lote
+            # 1. Liberar el lote
             lote.estado_disponibilidad = 'disponible'
             lote.save()
             
-            # 3. Registrar en historial de lote
+            # 2. Registrar en historial de lote
             HistorialLote.objects.create(
                 lote=lote,
                 estado_disponibilidad_anterior=estado_anterior,
                 estado_disponibilidad_nuevo='disponible',
-                notas=f"Venta ID {instance.id} marcada como CANCELADA por {self.request.user.username}. Lote liberado."
+                notas=f"Venta ID {instance.id} ELIMINADA físicamente por {self.request.user.username}. Lote liberado y registros financieros borrados en cascada."
             )
             
-            # 4. Eliminar financiamiento y cuotas
+            # 3. Eliminar financiamiento y cuotas asociadas al lote
             Financiamiento.objects.filter(lote=lote).delete()
             Cuota.objects.filter(venta=instance).delete()
             
-            # 5. Eliminar servicios contratados de ese cliente en ese lote
+            # 4. Eliminar servicios contratados de ese cliente en ese lote
             ConfiguracionServicioLote.objects.filter(lote=lote).delete()
             PagoServicio.objects.filter(lote=lote).delete()
 
-            # 6. Eliminar cotización asociada si existe
+            # 5. Eliminar cotización asociada a esta venta si existe (se asume que si el mismo cliente cotizó este lote)
             Cotizacion.objects.filter(lote=lote, cliente=instance.cliente).delete()
-
-    @action(detail=True, methods=['post'])
-    def restaurar(self, request, pk=None):
-        """
-        Restaura una venta cancelada si el lote sigue disponible.
-        """
-        from django.db import transaction
-        from lotes.models import HistorialLote
-        from financiamiento.models import Financiamiento
-        import math
-
-        instance = self.get_object()
-        if instance.estado != 'CANCELADA':
-            return Response({"error": "Solo se pueden restaurar ventas canceladas."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        lote = instance.lote
-        if lote.estado_disponibilidad != 'disponible':
-            return Response({"error": "El lote ya no está disponible para ser restaurado (actualmente: " + lote.estado_disponibilidad + ")."}, status=status.HTTP_400_BAD_REQUEST)
-
-        with transaction.atomic():
-            # 1. Determinar nuevo estado oficial
-            nuevo_estado = 'COMPLETADA' if instance.tipo_pago == 'CONTADO' else 'GENERADA'
-            instance.estado = nuevo_estado
-            instance.save()
-
-            # 2. Ocupar el lote
-            estado_nuevo_lote = 'pagado' if instance.tipo_pago == 'CONTADO' else 'financiado'
-            lote.estado_disponibilidad = estado_nuevo_lote
-            lote.save()
-
-            # 3. Registrar historial
-            HistorialLote.objects.create(
-                lote=lote,
-                estado_disponibilidad_anterior='disponible',
-                estado_disponibilidad_nuevo=estado_nuevo_lote,
-                notas=f"Venta ID {instance.id} RESTAURADA por {self.request.user.username}."
-            )
-
-            # 4. Re-crear financiamiento si es necesario
-            if instance.tipo_pago == 'FINANCIADO':
-                tasa_anual = float(instance.tasa_interes_anual) / 100.0
-                tasa_mensual = math.pow(1 + tasa_anual, 1/12) - 1
-                valor_financiar = float(instance.monto_financiar)
-                
-                if tasa_mensual > 0:
-                    cuota = (valor_financiar * tasa_mensual * math.pow(1 + tasa_mensual, instance.plazo_meses)) / (math.pow(1 + tasa_mensual, instance.plazo_meses) - 1)
-                else:
-                    cuota = valor_financiar / instance.plazo_meses
-
-                Financiamiento.objects.create(
-                    lote=lote,
-                    cliente=instance.cliente,
-                    vendedor=instance.vendedor,
-                    monto_total=instance.monto_financiar,
-                    plazo_meses=instance.plazo_meses,
-                    tasa_interes_anual=instance.tasa_interes_anual,
-                    cuota_mensual=round(cuota, 2),
-                    dia_pago=instance.fecha_creacion.day if instance.fecha_creacion else 1,
-                    estado='activo'
-                )
-
-        return Response(self.get_serializer(instance).data)
+            
+            # 6. Eliminar la venta físicamente
+            instance.delete()
 
     @action(detail=True, methods=['post'])
     def escriturar(self, request, pk=None):
@@ -271,37 +203,63 @@ class VentaViewSet(viewsets.ModelViewSet):
             plazo_meses = int(request.data.get('plazo_meses', 0))
             tasa_interes = float(request.data.get('tasa_interes', 0))
 
-            # Ajustar valor base si se acepta instalación
-            valor_base_calculo = valor_lote + (costo_instalacion if acepta_instalacion else Decimal('0'))
-            valor_con_descuento = max(Decimal('0'), valor_base_calculo - descuento)
-            valor_financiar = max(Decimal('0'), valor_con_descuento - enganche)
+            # Extraer enganche neto descontando la instalacion
+            enganche_puro = max(Decimal('0'), enganche - costo_instalacion)
 
-            # Tasa Efectiva Mensual = (1 + Tasa Anual Decimal)^(1/12) - 1
-            tasa_anual_decimal = tasa_interes / 100.0
-            tasa_mensual_efectiva = math.pow(1 + tasa_anual_decimal, 1 / 12) - 1
+            # 1) Valor Lote Neto y con descuento
+            valor_lote_con_descuento = max(Decimal('0'), valor_lote - descuento)
+            
+            # 2) Valor Total = (Valor del lote + el Costo de instalacion)
+            # Tomamos en cuenta el descuento sobre el lote primero.
+            valor_total = valor_lote_con_descuento + costo_instalacion
+            
+            # 3) Valor a Financiar = Valor Total - enganche
+            valor_financiar = max(Decimal('0'), valor_total - enganche)
+            faltante = max(Decimal('0'), valor_total - enganche)
+
+            # 4) Tasa Mensual Efectiva r = (tasa_anual * 0.01) / 12
+            tasa_anual_decimal = tasa_interes * 0.01
+            tasa_mensual_efectiva = round(tasa_anual_decimal / 12.0, 12)
             tasa_mensual_efectiva_porcentaje = tasa_mensual_efectiva * 100
 
+            # 5) Cuota Final Mensual = (P * r * ((1+ r)^n)) / (((1+ r)^n) - 1)
             cuota_final = 0.0
-
             if tipo_pago == 'financiado' and plazo_meses > 0 and float(valor_financiar) > 0:
-                vf_float = float(valor_financiar)
-                if tasa_mensual_efectiva > 0:
-                    numerador = vf_float * tasa_mensual_efectiva * math.pow(1 + tasa_mensual_efectiva, plazo_meses)
-                    denominador = math.pow(1 + tasa_mensual_efectiva, plazo_meses) - 1
-                    cuota_final = numerador / denominador
+                P = float(valor_financiar)
+                r = float(tasa_mensual_efectiva)
+                n = float(plazo_meses)
+                
+                if r > 0:
+                    numerador = P * r * math.pow(1 + r, n)
+                    denominador = math.pow(1 + r, n) - 1
+                    cuota_final = round(numerador / denominador, 2)
                 else:
-                    cuota_final = vf_float / plazo_meses
+                    cuota_final = round(P / n, 2)
 
             total_pagar_hoy = float(enganche + valor_financiar) if tipo_pago == 'contado' else float(enganche)
 
+            # 6) Total de Financia (+ intereses) = Cuota Final Mensual * Plazo en meses
+            total_financia_mas_intereses = round(cuota_final * plazo_meses, 2)
+            
+            # 7) Valor de los intereses = Total de Financia - Valor a Financiar
+            valor_intereses = round(total_financia_mas_intereses - float(valor_financiar), 2)
+            
+            enganche_puro = max(Decimal('0'), enganche - costo_instalacion)
+
             return Response({
                 'valor_lote': float(valor_lote),
-                'valor_con_descuento': float(valor_con_descuento),
+                'valor_lote_con_descuento': float(valor_lote_con_descuento),
+                'valor_total': float(valor_total),
+                'valor_con_descuento': float(valor_total),
+                'enganche_puro': float(enganche_puro),
+                'faltante': float(faltante),
                 'valor_financiar': float(valor_financiar),
                 'tasa_anual': tasa_interes,
                 'tasa_mensual_efectiva_porcentaje': tasa_mensual_efectiva_porcentaje,
                 'plazo_meses': plazo_meses,
                 'cuota_final_mensual': cuota_final,
+                'total_financia_mas_intereses': total_financia_mas_intereses,
+                'valor_intereses': valor_intereses,
                 'total_pagar_hoy': total_pagar_hoy
             }, status=status.HTTP_200_OK)
         except Exception as e:
@@ -428,6 +386,27 @@ class VentaViewSet(viewsets.ModelViewSet):
                 'valorTotal': float(v_tot)
             })
 
+        # 6. Ventas por vendedor en el periodo
+        ventas_por_vendedor_qs = ventas_mensuales_qs.values('vendedor__username', 'vendedor__first_name', 'vendedor__last_name', 'vendedor__empleado__nombre', 'vendedor__empleado__apellido').annotate(
+            ventas=Count('id'),
+            monto=Sum('valor_lote')
+        ).order_by('-ventas')
+
+        ventas_por_vendedor = []
+        for v in ventas_por_vendedor_qs:
+            if v.get('vendedor__empleado__nombre'):
+                nombre = f"{v['vendedor__empleado__nombre']} {v.get('vendedor__empleado__apellido', '')}".strip()
+            elif v.get('vendedor__first_name'):
+                nombre = f"{v['vendedor__first_name']} {v.get('vendedor__last_name', '')}".strip()
+            else:
+                nombre = v['vendedor__username']
+            
+            ventas_por_vendedor.append({
+                'vendedor': nombre,
+                'ventas': v['ventas'],
+                'monto': float(v['monto'] or 0)
+            })
+
         response_data = {
             'lotesDisponibles': lotes_disponibles,
             'lotesFinanciados': lotes_financiados,
@@ -442,7 +421,8 @@ class VentaViewSet(viewsets.ModelViewSet):
             'valorReservas': float(valor_reservas),
             'valorPendienteCobro': float(saldo_pendiente),
             'dataVentasMensuales': data_ventas_mensuales,
-            'resumenPorManzana': resumen_por_manzana
+            'resumenPorManzana': resumen_por_manzana,
+            'ventasPorVendedor': ventas_por_vendedor
         }
 
         return Response(response_data)
@@ -584,12 +564,12 @@ class LiquidacionComisionViewSet(viewsets.ModelViewSet):
         if instance.estado_pago == 'PAGADO':
             return Response({'error': 'Esta liquidación ya ha sido pagada.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        referencia = request.data.get('referencia_pago')
+        forma = request.data.get('forma_pago')
         
         instance.estado_pago = 'PAGADO'
         instance.fecha_pago = timezone.now().date()
         instance.es_pago_inmediato = True
-        instance.referencia_pago = referencia
+        instance.forma_pago = forma
         instance.save()
         
         return Response(self.get_serializer(instance).data)
@@ -645,7 +625,7 @@ class LiquidacionComisionViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def pagar_multiples(self, request):
         ids = request.data.get('ids', [])
-        referencia = request.data.get('referencia_pago', '')
+        forma = request.data.get('forma_pago', '')
         
         if not ids or not isinstance(ids, list):
             return Response({'error': 'Debe proporcionar una lista de IDs.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -660,53 +640,150 @@ class LiquidacionComisionViewSet(viewsets.ModelViewSet):
             estado_pago='PAGADO',
             fecha_pago=timezone.now().date(),
             es_pago_inmediato=True,
-            referencia_pago=referencia
+            forma_pago=forma
         )
         
         return Response({'mensaje': f'Se registraron {cantidad} pagos exitosamente.'}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def exportar_excel(self, request):
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset()).select_related(
+            'venta__cliente', 'venta__lote__manzana__lotificacion', 'vendedor'
+        )
+        if not queryset.exists():
+            return Response({'error': 'No hay registros para exportar en este periodo.'}, status=status.HTTP_400_BAD_REQUEST)
         
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Liquidaciones"
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        def aplicar_estilos(ws, title, headers, start_row=3):
+            # Título principal
+            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+            ws.cell(row=1, column=1, value=title).font = Font(size=14, bold=True)
+            ws.cell(row=1, column=1).alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Headers
+            ws.append([]) # Fila 2 vacía
+            ws.append(headers) # Fila 3 headers
+            
+            for cell in ws[start_row]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = thin_border
+                
+        def aplicar_bordes_y_anchos(ws, start_row=3):
+            for row in ws.iter_rows(min_row=start_row, max_row=ws.max_row):
+                for cell in row:
+                    cell.border = thin_border
+            
+            for col in ws.iter_cols(min_row=start_row, max_row=ws.max_row):
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                ws.column_dimensions[column].width = max_length + 2
 
-        # Encabezados
-        headers = ["Vendedor", "Folio Venta", "Valor Lote", "Monto Comisión", "Fecha Venta", "Fecha Pago Real", "Estado"]
-        for col_num, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col_num, value=header)
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal='center')
+        # ================================
+        # HOJA 1: Ventas
+        # ================================
+        ws_ventas = wb.active
+        ws_ventas.title = "Ventas"
+        headers_v = ["Lotificacion", "Lote", "Vendedor", "Cliente", "Fecha", "Valor del Lote", "Valor de la venta", "Comision %", "Comision Q"]
+        aplicar_estilos(ws_ventas, "Reporte de Ventas del Periodo", headers_v)
+        
+        ws_ventas.auto_filter.ref = f"A3:C{queryset.count()+3}"
+        
+        from empleados.models import Empleado
+        
+        resumen_dict = {}
+        
+        for liq in queryset:
+            venta = liq.venta
+            vendedor = liq.vendedor
+            empleado = Empleado.objects.filter(usuario=vendedor).first()
+            vendedor_nombre = f"{empleado.nombre} {empleado.apellido}".strip() if empleado else vendedor.username
+            
+            if vendedor_nombre not in resumen_dict:
+                resumen_dict[vendedor_nombre] = {
+                    'ventas': 0, 'total_vendido': 0, 'generada': 0, 'pagada': 0, 'pendiente': 0
+                }
+            resumen_dict[vendedor_nombre]['ventas'] += 1
+            resumen_dict[vendedor_nombre]['total_vendido'] += float(venta.valor_lote)
+            resumen_dict[vendedor_nombre]['generada'] += float(liq.monto_pagado)
+            if liq.estado_pago == 'PAGADO':
+                resumen_dict[vendedor_nombre]['pagada'] += float(liq.monto_pagado)
+            else:
+                resumen_dict[vendedor_nombre]['pendiente'] += float(liq.monto_pagado)
 
-        # Datos
-        for row_num, liq in enumerate(queryset, 2):
-            vendedor = liq.vendedor_nombre if hasattr(liq, 'vendedor_nombre') else liq.vendedor.username
-            if not vendedor: # Si falla el SerializerMethodField en crudo
-                 vendedor = f"{liq.vendedor.first_name} {liq.vendedor.last_name}".strip() or liq.vendedor.username
+            porcentaje = empleado.porcentaje_comision if empleado else 0
+            
+            # Formatear Lote "A-1"
+            lote_nombre = "N/A"
+            if venta.lote:
+                manz = venta.lote.manzana.nombre if venta.lote.manzana else ""
+                lote_nombre = f"{manz}-{venta.lote.numero_lote}" if manz else venta.lote.numero_lote
+            
+            ws_ventas.append([
+                venta.lote.manzana.lotificacion.nombre if venta.lote and venta.lote.manzana and venta.lote.manzana.lotificacion else "N/A",
+                lote_nombre,
+                vendedor_nombre,
+                f"{venta.cliente.nombres} {venta.cliente.apellidos}",
+                venta.fecha_creacion.strftime('%Y-%m-%d'),
+                float(venta.lote.valor_total) if venta.lote else 0,
+                float(venta.valor_lote),
+                float(porcentaje),
+                float(liq.monto_pagado)
+            ])
+            
+        aplicar_bordes_y_anchos(ws_ventas)
+        
+        # ================================
+        # HOJA 2: Pagos de Comisiones
+        # ================================
+        ws_pagos = wb.create_sheet(title="Pagos de Comisiones")
+        headers_p = ["ID-Pago", "Folio Venta", "Vendedor", "Comision Q", "Fecha-Pago", "Estado"]
+        aplicar_estilos(ws_pagos, "Reporte de Pagos Realizados", headers_p)
+            
+        ws_pagos.auto_filter.ref = f"C3:C{queryset.count()+3}"
+        
+        for liq in queryset:
+            vendedor = liq.vendedor
+            empleado = Empleado.objects.filter(usuario=vendedor).first()
+            vendedor_nombre = f"{empleado.nombre} {empleado.apellido}".strip() if empleado else vendedor.username
+            ws_pagos.append([
+                liq.id,
+                f"V-{liq.venta.id}",
+                vendedor_nombre,
+                float(liq.monto_pagado),
+                liq.fecha_pago.strftime('%Y-%m-%d') if liq.fecha_pago else "",
+                liq.estado_pago
+            ])
+        aplicar_bordes_y_anchos(ws_pagos)
 
-            ws.cell(row=row_num, column=1, value=vendedor)
-            ws.cell(row=row_num, column=2, value=f"V-{liq.venta.id}")
-            ws.cell(row=row_num, column=3, value=float(liq.venta.valor_lote))
-            ws.cell(row=row_num, column=4, value=float(liq.monto_pagado))
-            ws.cell(row=row_num, column=5, value=liq.venta.fecha_creacion.strftime('%Y-%m-%d'))
-            ws.cell(row=row_num, column=6, value=liq.fecha_pago.strftime('%Y-%m-%d') if liq.fecha_pago else "PENDIENTE")
-            ws.cell(row=row_num, column=7, value=liq.estado_pago)
-
-        # Ajustar ancho de columnas
-        for col in ws.columns:
-            max_length = 0
-            column = col[0].column_letter
-            for cell in col:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = (max_length + 2)
-            ws.column_dimensions[column].width = adjusted_width
-
+        # ================================
+        # HOJA 3: Resumen de Vendedores
+        # ================================
+        ws_resumen = wb.create_sheet(title="Resumen de Vendedores")
+        headers_r = ["Vendedor", "Ventas", "Total Vendido", "Comision Generada", "Comision pagada", "Pendiente", "Firma"]
+        aplicar_estilos(ws_resumen, "Resumen General por Vendedor", headers_r)
+            
+        for vendedor_nombre, data in resumen_dict.items():
+            ws_resumen.append([
+                vendedor_nombre,
+                data['ventas'],
+                data['total_vendido'],
+                data['generada'],
+                data['pagada'],
+                data['pendiente'],
+                ""
+            ])
+        aplicar_bordes_y_anchos(ws_resumen)
+        
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename=planillas_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
         wb.save(response)
@@ -725,17 +802,9 @@ class CotizacionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        all_cotizaciones = self.request.query_params.get('all') == 'true'
         
-        is_super = user.is_superuser or (
-            hasattr(user, 'user_roles') and 
-            user.user_roles.filter(role__name='Superadmin', is_active=True).exists()
-        )
-
-        if is_super and all_cotizaciones:
-            queryset = Cotizacion.objects.all().select_related('cliente', 'lote__manzana__lotificacion', 'vendedor')
-        else:
-            queryset = Cotizacion.objects.filter(vendedor=user).select_related('cliente', 'lote__manzana__lotificacion', 'vendedor')
+        # Siempre restringir a las cotizaciones del usuario activo
+        queryset = Cotizacion.objects.filter(vendedor=user).select_related('cliente', 'lote__manzana__lotificacion', 'vendedor')
 
         search = self.request.query_params.get('search')
         estado = self.request.query_params.get('estado')
@@ -914,7 +983,7 @@ class CotizacionViewSet(viewsets.ModelViewSet):
 
         # Cálculos de Interés Mensual y Cuota
         tasa_anual_decimal = float(cotizacion.tasa_interes_anual) / 100.0
-        tasa_mensual_efectiva = math.pow(1 + tasa_anual_decimal, 1 / 12) - 1
+        tasa_mensual_efectiva = round(tasa_anual_decimal / 12.0, 12)
         
         ws['D13'] = "Tasa Mensual EF.:"
         ws['E13'] = f"{round(tasa_mensual_efectiva * 100, 4)}%"
@@ -944,9 +1013,9 @@ class CotizacionViewSet(viewsets.ModelViewSet):
             if tasa_mensual_efectiva > 0:
                 numerador = saldo_insoluto * tasa_mensual_efectiva * math.pow(1 + tasa_mensual_efectiva, cotizacion.plazo_meses)
                 denominador = math.pow(1 + tasa_mensual_efectiva, cotizacion.plazo_meses) - 1
-                cuota_mensual = numerador / denominador
+                cuota_mensual = round(numerador / denominador, 2)
             else:
-                cuota_mensual = saldo_insoluto / cotizacion.plazo_meses
+                cuota_mensual = round(saldo_insoluto / cotizacion.plazo_meses, 2)
 
             for i in range(1, cotizacion.plazo_meses + 1):
                 interes_cuota = saldo_insoluto * tasa_mensual_efectiva

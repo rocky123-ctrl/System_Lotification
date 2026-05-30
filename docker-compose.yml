@@ -25,27 +25,27 @@ services:
     networks:
       - app_network
 
-    worker:
-      build: .
-      command: celery -A system_lotificacion worker -l INFO
-      volumes:
-        - .:/app
-        - media_volume:/app/media
-      environment:
-        DEBUG: ${DEBUG}
-        SECRET_KEY: ${SECRET_KEY}
-        ALLOWED_HOSTS: ${ALLOWED_HOSTS}
-        DB_NAME: ${DB_NAME}
-        DB_USER: ${DB_USER}
-        DB_PASSWORD: ${DB_PASSWORD}
-        DB_HOST: db
-        DB_PORT: 5432
-        REDIS_URL: redis://redis:6379/0
-      depends_on:
-        - db
-        - redis
-      networks:
-        - app_network
+  worker:
+    build: .
+    command: celery -A system_lotificacion worker -l INFO
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    environment:
+      DEBUG: ${DEBUG}
+      SECRET_KEY: ${SECRET_KEY}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    networks:
+      - app_network
 
   db:
     image: postgres:16

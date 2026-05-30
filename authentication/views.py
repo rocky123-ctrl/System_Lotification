@@ -25,7 +25,7 @@ def register_user(request):
         # Iniciar tracker de inactividad
         from django.core.cache import cache
         from django.conf import settings
-        timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 1200)
+        timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 600)
         cache.set(f'last_activity_{user.id}', True, timeout=timeout_seconds)
 
         return Response({
@@ -55,7 +55,7 @@ def login_user(request):
             # Iniciar tracker de inactividad
             from django.core.cache import cache
             from django.conf import settings
-            timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 1200)
+            timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 600)
             cache.set(f'last_activity_{user.id}', True, timeout=timeout_seconds)
 
             return Response({

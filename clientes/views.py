@@ -37,6 +37,11 @@ class ClienteViewSet(viewsets.ModelViewSet):
             "total": total
         })
 
+    def destroy(self, request, *args, **kwargs):
+        if not (request.user.is_superuser or hasattr(request.user, 'user_roles') and request.user.user_roles.filter(role__name__in=['Superadmin', 'Administrador'], is_active=True).exists()):
+            return Response({"detail": "No tienes permiso para eliminar clientes."}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=False, methods=['post'], url_path='registrar')
     def registrar(self, request):
         """
@@ -57,6 +62,9 @@ class ClienteViewSet(viewsets.ModelViewSet):
         (Ventas, Cotizaciones, Servicios, Pagos).
         Libera los lotes asociados dejándolos en estado 'disponible'.
         """
+        if not (request.user.is_superuser or hasattr(request.user, 'user_roles') and request.user.user_roles.filter(role__name__in=['Superadmin', 'Administrador'], is_active=True).exists()):
+            return Response({"detail": "No tienes permiso para forzar la eliminación de clientes."}, status=status.HTTP_403_FORBIDDEN)
+            
         cliente = self.get_object()
         from django.db import transaction
         from ventas.models import Venta, Cotizacion

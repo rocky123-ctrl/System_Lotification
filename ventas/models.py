@@ -93,19 +93,41 @@ class Venta(models.Model):
         # Re-calcular monto a financiar (Verdad lógica en el servidor)
         # Se incluye el costo de instalación si se aceptó y se resta el descuento
         costo_instalacion = self.lote.costo_instalacion if self.acepta_instalacion else Decimal('0.00')
-        self.valor_lote = (self.lote.valor_total + costo_instalacion) - self.descuento
-        monto_calculado = self.valor_lote - self.enganche
+        base_valor_lote = (self.lote.valor_total + costo_instalacion) - self.descuento
+        monto_calculado = base_valor_lote - self.enganche
         
         if self.tipo_pago == 'FINANCIADO':
             if self.plazo_meses <= 0:
                 raise ValidationError("Para ventas financiadas, el plazo en meses debe ser mayor a 0.")
             self.monto_financiar = max(Decimal('0.00'), monto_calculado)
             self.total_pagar_contado = Decimal('0.00')
+            
+            # Calcular valor_lote como Enganche + Total Financiado (con intereses)
+            import math
+            tasa_anual_decimal = float(self.tasa_interes_anual) * 0.01
+            tasa_mensual_efectiva = round(tasa_anual_decimal / 12.0, 12)
+            
+            cuota_final = 0.0
+            if self.plazo_meses > 0 and float(self.monto_financiar) > 0:
+                P = float(self.monto_financiar)
+                r = float(tasa_mensual_efectiva)
+                n = float(self.plazo_meses)
+                
+                if r > 0:
+                    numerador = P * r * math.pow(1 + r, n)
+                    denominador = math.pow(1 + r, n) - 1
+                    cuota_final = round(numerador / denominador, 2)
+                else:
+                    cuota_final = round(P / n, 2)
+                    
+            total_financia_mas_intereses = round(cuota_final * self.plazo_meses, 2)
+            self.valor_lote = Decimal(str(total_financia_mas_intereses)) + self.enganche
         else:
             # Si es Al Contado, reseteamos plazo e interés
             self.monto_financiar = Decimal('0.00')
             self.plazo_meses = 0
             self.tasa_interes_anual = 0
+            self.valor_lote = base_valor_lote
             self.total_pagar_contado = max(Decimal('0.00'), self.valor_lote)
 
         super().clean()
@@ -159,11 +181,10 @@ class Venta(models.Model):
                         estado_pago='PENDIENTE'
                     )
 
-                # Generar el plan de financiamiento y cuotas en el módulo de financiamiento si aplica
-                if self.tipo_pago == 'FINANCIADO':
-                    self.crear_plan_financiamiento()
+            # Sincronizar el plan de financiamiento en 'financiamiento' app
+            self.sincronizar_plan_financiamiento()
             
-            # Sincronización de cuotas: debe ejecutarse tanto al crear como al editar.
+            # Sincronización de cuotas en 'cuentas_cobrar' app
             from cuentas_cobrar.logic import sincronizar_cuotas
             sincronizar_cuotas(self)
             self.actualizar_totales()
@@ -215,6 +236,26 @@ class Venta(models.Model):
             estado=self.estado
         )
 
+    def sincronizar_plan_financiamiento(self):
+        """
+        Sincroniza el registro de Financiamiento de la app 'financiamiento' con la Venta actual.
+        Crea, actualiza o elimina el financiamiento según el tipo de pago.
+        """
+        from financiamiento.models import Financiamiento, Cuota
+        
+        if self.tipo_pago != 'FINANCIADO':
+            Financiamiento.objects.filter(lote=self.lote).delete()
+            return
+            
+        finan = Financiamiento.objects.filter(lote=self.lote).first()
+        if not finan:
+            self.crear_plan_financiamiento()
+        else:
+            # Si ya existe, actualizamos los valores del plan para que cuadren con la Venta editada.
+            # Regeneramos las cuotas si el plazo o el monto cambiaron, asumiendo que es una corrección.
+            Financiamiento.objects.filter(lote=self.lote).delete()
+            self.crear_plan_financiamiento()
+
     def crear_plan_financiamiento(self):
         """Genera el financiamiento y las cuotas iniciales"""
         from financiamiento.models import Financiamiento, Cuota
@@ -224,16 +265,16 @@ class Venta(models.Model):
 
         # Tasa efectiva mensual
         tasa_anual_decimal = float(self.tasa_interes_anual) / 100.0
-        tasa_mensual_efectiva = math.pow(1 + tasa_anual_decimal, 1 / 12) - 1
+        tasa_mensual_efectiva = round(tasa_anual_decimal / 12.0, 12)
         
         cuota_mensual = 0
         if self.plazo_meses > 0 and float(self.monto_financiar) > 0:
             if tasa_mensual_efectiva > 0:
                 numerador = float(self.monto_financiar) * tasa_mensual_efectiva * math.pow(1 + tasa_mensual_efectiva, self.plazo_meses)
                 denominador = math.pow(1 + tasa_mensual_efectiva, self.plazo_meses) - 1
-                cuota_mensual = numerador / denominador
+                cuota_mensual = round(numerador / denominador, 2)
             else:
-                cuota_mensual = float(self.monto_financiar) / self.plazo_meses
+                cuota_mensual = round(float(self.monto_financiar) / self.plazo_meses, 2)
 
         financiamiento = Financiamiento.objects.create(
             lote=self.lote,
@@ -285,7 +326,7 @@ class LiquidacionComision(models.Model):
     monto_pagado = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name='Monto de Comisión')
     fecha_pago = models.DateField(null=True, blank=True, verbose_name='Fecha de Pago')
     es_pago_inmediato = models.BooleanField(default=False, verbose_name='Es Pago Inmediato')
-    referencia_pago = models.CharField(max_length=100, null=True, blank=True, verbose_name='Referencia de Pago')
+    forma_pago = models.CharField(max_length=20, choices=Venta.FORMA_PAGO_CHOICES, null=True, blank=True, verbose_name='Forma de Pago')
     estado_pago = models.CharField(max_length=20, default='PENDIENTE', choices=ESTADO_CHOICES)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
 
@@ -378,18 +419,40 @@ class Cotizacion(models.Model):
             raise ValidationError("Debe especificar un cliente registrado o un nombre de prospecto.")
 
         costo_instalacion = self.lote.costo_instalacion if self.acepta_instalacion else Decimal('0.00')
-        self.valor_lote = (self.lote.valor_total + costo_instalacion) - self.descuento
-        monto_calculado = self.valor_lote - self.enganche
+        base_valor_lote = (self.lote.valor_total + costo_instalacion) - self.descuento
+        monto_calculado = base_valor_lote - self.enganche
         
         if self.tipo_pago == 'FINANCIADO':
             if self.plazo_meses <= 0:
                 raise ValidationError("Para cotizaciones financiadas, el plazo en meses debe ser mayor a 0.")
             self.monto_financiar = max(Decimal('0.00'), monto_calculado)
             self.total_pagar_contado = Decimal('0.00')
+            
+            # Calcular valor_lote como Enganche + Total Financiado (con intereses)
+            import math
+            tasa_anual_decimal = float(self.tasa_interes_anual) * 0.01
+            tasa_mensual_efectiva = round(tasa_anual_decimal / 12.0, 12)
+            
+            cuota_final = 0.0
+            if self.plazo_meses > 0 and float(self.monto_financiar) > 0:
+                P = float(self.monto_financiar)
+                r = float(tasa_mensual_efectiva)
+                n = float(self.plazo_meses)
+                
+                if r > 0:
+                    numerador = P * r * math.pow(1 + r, n)
+                    denominador = math.pow(1 + r, n) - 1
+                    cuota_final = round(numerador / denominador, 2)
+                else:
+                    cuota_final = round(P / n, 2)
+                    
+            total_financia_mas_intereses = round(cuota_final * self.plazo_meses, 2)
+            self.valor_lote = Decimal(str(total_financia_mas_intereses)) + self.enganche
         else:
             self.monto_financiar = Decimal('0.00')
             self.plazo_meses = 0
             self.tasa_interes_anual = 0
+            self.valor_lote = base_valor_lote
             self.total_pagar_contado = max(Decimal('0.00'), self.valor_lote)
 
         super().clean()

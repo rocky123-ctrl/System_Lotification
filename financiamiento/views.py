@@ -369,14 +369,15 @@ class FinanciamientoViewSet(viewsets.ModelViewSet):
             # Convertir tasa anual a mensual usando la fórmula correcta
             # tasa_mensual = (1 + tasa_anual)^(1/12) - 1
             tasa_anual_decimal = tasa_anual / Decimal('100')
-            tasa_mensual_decimal = (Decimal('1') + tasa_anual_decimal) ** (Decimal('1') / Decimal('12')) - Decimal('1')
+            tasa_mensual_decimal = round(tasa_anual_decimal / Decimal('12'), 12)
             tasa_mensual = tasa_mensual_decimal * Decimal('100')
-            tasa_decimal = tasa_mensual / 100
+            tasa_decimal = tasa_mensual_decimal
             
             if tasa_decimal > 0 and cuotas_pendientes > 0:
-                nueva_cuota_mensual = saldo_nuevo * (tasa_decimal * (1 + tasa_decimal)**cuotas_pendientes) / ((1 + tasa_decimal)**cuotas_pendientes - 1)
+                nueva_cuota_mensual_bruta = saldo_nuevo * (tasa_decimal * (1 + tasa_decimal)**cuotas_pendientes) / ((1 + tasa_decimal)**cuotas_pendientes - 1)
+                nueva_cuota_mensual = round(nueva_cuota_mensual_bruta, 2)
             else:
-                nueva_cuota_mensual = saldo_nuevo / cuotas_pendientes if cuotas_pendientes > 0 else 0
+                nueva_cuota_mensual = round(saldo_nuevo / cuotas_pendientes, 2) if cuotas_pendientes > 0 else 0
             
             # Calcular ahorro estimado
             ahorro_estimado = monto * tasa_decimal * cuotas_pendientes / 2

@@ -21,7 +21,7 @@ def sincronizar_cuotas(venta):
     import math
 
     tasa_anual = float(venta.tasa_interes_anual) / 100.0
-    r = math.pow(1 + tasa_anual, 1/12) - 1 # Tasa mensual efectiva
+    r = round(tasa_anual / 12.0, 12) # Tasa mensual efectiva
     
     total_financiar = float(venta.monto_financiar)
     plazo_meses = venta.plazo_meses

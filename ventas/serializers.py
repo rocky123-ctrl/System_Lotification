@@ -79,7 +79,7 @@ class LiquidacionComisionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'venta', 'vendedor', 'vendedor_nombre', 
             'fecha_venta', 'lote_numero', 'monto_pagado', 
-            'fecha_pago', 'es_pago_inmediato', 'referencia_pago', 
+            'fecha_pago', 'es_pago_inmediato', 'forma_pago', 
             'estado_pago', 'fecha_creacion'
         ]
         read_only_fields = ['id', 'venta', 'vendedor', 'monto_pagado', 'fecha_creacion', 'estado_pago']
@@ -126,7 +126,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             return 0.0
 
         tasa_anual_decimal = float(obj.tasa_interes_anual) / 100.0
-        tasa_mensual_efectiva = math.pow(1 + tasa_anual_decimal, 1 / 12) - 1
+        tasa_mensual_efectiva = round(tasa_anual_decimal / 12.0, 12)
         vf_float = float(obj.monto_financiar)
 
         if tasa_mensual_efectiva > 0:

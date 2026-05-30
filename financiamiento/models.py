@@ -143,7 +143,7 @@ class Financiamiento(models.Model):
         # Convertir tasa anual a mensual usando la fórmula correcta
         # tasa_mensual = (1 + tasa_anual)^(1/12) - 1
         tasa_anual_decimal = tasa_anual / Decimal('100')
-        tasa_mensual_decimal = (Decimal('1') + tasa_anual_decimal) ** (Decimal('1') / Decimal('12')) - Decimal('1')
+        tasa_mensual_decimal = round(tasa_anual_decimal / Decimal('12'), 12)
         tasa_mensual = tasa_mensual_decimal * Decimal('100')
         
         # Calcular nuevo saldo restante después del pago a capital
@@ -172,9 +172,10 @@ class Financiamiento(models.Model):
         
         if tasa_decimal > 0:
             # Fórmula de amortización: PMT = PV * (r * (1 + r)^n) / ((1 + r)^n - 1)
-            nueva_cuota_mensual = nuevo_saldo * (tasa_decimal * (1 + tasa_decimal)**num_cuotas_pendientes) / ((1 + tasa_decimal)**num_cuotas_pendientes - 1)
+            nueva_cuota_mensual_bruta = nuevo_saldo * (tasa_decimal * (1 + tasa_decimal)**num_cuotas_pendientes) / ((1 + tasa_decimal)**num_cuotas_pendientes - 1)
+            nueva_cuota_mensual = round(nueva_cuota_mensual_bruta, 2)
         else:
-            nueva_cuota_mensual = nuevo_saldo / num_cuotas_pendientes
+            nueva_cuota_mensual = round(nuevo_saldo / num_cuotas_pendientes, 2)
         
         # Actualizar cuota mensual del financiamiento
         self.cuota_mensual = nueva_cuota_mensual

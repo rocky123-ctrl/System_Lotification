@@ -114,10 +114,9 @@ class ConfiguracionGeneral(models.Model):
         """Sobrescribir save para calcular tasa mensual automáticamente"""
         # Calcular tasa mensual basada en la tasa anual
         if self.tasa_anual > 0:
-            # Fórmula: tasa_mensual = (1 + tasa_anual/100)^(1/12) - 1
+            # Fórmula: tasa_mensual = tasa_anual / 12
             tasa_anual_decimal = self.tasa_anual / Decimal('100')
-            exponente = Decimal('1') / Decimal('12')
-            self.tasa_mensual = ((Decimal('1') + tasa_anual_decimal) ** exponente - Decimal('1')) * Decimal('100')
+            self.tasa_mensual = round(tasa_anual_decimal / Decimal('12'), 12) * Decimal('100')
         
         super().save(*args, **kwargs)
 

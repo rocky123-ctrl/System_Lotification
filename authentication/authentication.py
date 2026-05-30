@@ -23,7 +23,7 @@ class InactivityJWTAuthentication(JWTAuthentication):
                 )
             
             # Restart the inactivity timer
-            timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 1200)  # 20 min default
+            timeout_seconds = getattr(settings, 'INACTIVITY_TIMEOUT_SECONDS', 600)  # 10 min default
             cache.set(cache_key, True, timeout=timeout_seconds)
             
         return result

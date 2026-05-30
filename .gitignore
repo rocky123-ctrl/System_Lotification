@@ -1,0 +1,37 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Django settings
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# File uploads and static collections
+media/
+staticfiles/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docker
+.dockerignore
+
+# Celery
+celerybeat-schedule
+celerybeat.pid

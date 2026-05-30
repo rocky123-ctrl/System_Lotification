@@ -150,7 +150,7 @@ class PagoCapitalCreateSerializer(serializers.ModelSerializer):
                 tasa_anual = config.tasa_anual
                 # Convertir a mensual para el cálculo
                 tasa_anual_decimal = tasa_anual / Decimal('100')
-                tasa_mensual_decimal = (Decimal('1') + tasa_anual_decimal) ** (Decimal('1') / Decimal('12')) - Decimal('1')
+                tasa_mensual_decimal = round(tasa_anual_decimal / Decimal('12'), 12)
                 tasa_mensual = tasa_mensual_decimal * Decimal('100')
                 
                 # Cálculo del ahorro estimado
@@ -224,7 +224,7 @@ class FinanciamientoSerializer(serializers.ModelSerializer):
                 tasa_anual = config.tasa_anual
                 # Convertir a mensual para el cálculo
                 tasa_anual_decimal = tasa_anual / Decimal('100')
-                tasa_mensual_decimal = (Decimal('1') + tasa_anual_decimal) ** (Decimal('1') / Decimal('12')) - Decimal('1')
+                tasa_mensual_decimal = round(tasa_anual_decimal / Decimal('12'), 12)
                 tasa_mensual = tasa_mensual_decimal * Decimal('100')
                 
                 # Cálculo del ahorro estimado
@@ -318,10 +318,11 @@ class FinanciamientoCreateSerializer(serializers.ModelSerializer):
         
         if tasa_decimal > 0:
             # Fórmula de amortización
-            cuota_mensual = principal * (tasa_decimal * (1 + tasa_decimal)**num_cuotas) / ((1 + tasa_decimal)**num_cuotas - 1)
+            cuota_mensual_bruta = principal * (tasa_decimal * (1 + tasa_decimal)**num_cuotas) / ((1 + tasa_decimal)**num_cuotas - 1)
+            cuota_mensual = round(cuota_mensual_bruta, 2)
         else:
             # Si tasa es 0, dividir el capital entre las cuotas
-            cuota_mensual = principal / num_cuotas
+            cuota_mensual = round(principal / num_cuotas, 2)
         
         # Actualizar la cuota_mensual en el financiamiento
         financiamiento.cuota_mensual = cuota_mensual

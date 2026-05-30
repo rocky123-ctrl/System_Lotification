@@ -33,6 +33,24 @@ class BilleteraServicioViewSet(viewsets.ModelViewSet):
     queryset = BilleteraServicio.objects.all()
     serializer_class = BilleteraServicioSerializer
 
+    def destroy(self, request, *args, **kwargs):
+        billetera = self.get_object()
+        cliente = billetera.cliente
+        
+        # Encontrar los lotes del cliente
+        from ventas.models import Venta
+        from lotes.models import Lote
+        lotes_cliente = Lote.objects.filter(ventas__cliente=cliente)
+
+        with transaction.atomic():
+            # Eliminar en cascada las configuraciones y pagos
+            ConfiguracionServicioLote.objects.filter(lote__in=lotes_cliente).delete()
+            PagoServicio.objects.filter(lote__in=lotes_cliente).delete()
+            # Eliminar la billetera misma
+            billetera.delete()
+            
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=['get'])
     def lots_status(self, request, pk=None):
         """
